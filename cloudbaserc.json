@@ -1,0 +1,13 @@
+{
+  "envId": "REPLACE_WITH_YOUR_ENV_ID",
+  "functionRoot": "cloudfunctions",
+  "functions": [
+    {
+      "name": "api",
+      "timeout": 15,
+      "runtime": "Nodejs18.15",
+      "installDependency": true,
+      "handler": "index.main"
+    }
+  ]
+}

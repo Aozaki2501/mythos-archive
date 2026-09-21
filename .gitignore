@@ -1,0 +1,19 @@
+node_modules/
+.next/
+data/
+.env
+.env.local
+next-env.d.ts
+*.tsbuildinfo
+
+# Generated build output and local QA artifacts
+dist/
+output/
+.playwright-cli/
+__pycache__/
+*.py[cod]
+
+# Local runtime databases
+*.db
+*.sqlite
+*.sqlite3
