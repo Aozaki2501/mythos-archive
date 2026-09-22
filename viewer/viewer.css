@@ -2039,6 +2039,43 @@ body.is-authing .mobile-bar {
   line-height: 1.7;
 }
 
+.global-search-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 12px;
+}
+
+.global-search-suggestion-label {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.global-search-suggestion {
+  min-height: 28px;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.global-search-suggestion:hover,
+.global-search-suggestion:focus-visible,
+.global-search-suggestion[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-weak);
+}
+
+.global-search-recovery {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .global-search-results {
   max-height: min(52vh, 460px);
   overflow: auto;
@@ -3442,5 +3479,563 @@ body:has(.layout.home-active) .mobile-bar {
   .work-body {
     font-size: 17px;
     line-height: 1.95;
+  }
+}
+
+/* ---------- 卡莉欧碧 · 夜间馆员导览助手 ---------- */
+.witch-assistant {
+  position: fixed;
+  left: 280px;
+  bottom: 16px;
+  z-index: 24;
+  width: 224px;
+  height: 320px;
+  pointer-events: none;
+  color: var(--text);
+}
+
+.witch-assistant.is-sidebar-collapsed {
+  left: 12px;
+}
+
+.witch-assistant[hidden] {
+  display: none;
+}
+
+.witch-assistant.is-minimized .witch-figure {
+  display: none;
+}
+
+/* 文章页已有固定的上下篇 HUD，助手向上让出这块交互区域。 */
+body[data-view="reader"] .witch-assistant,
+body[data-view="results"] .witch-assistant {
+  bottom: 64px;
+}
+
+.witch-figure {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 224px;
+  height: 320px;
+  pointer-events: none;
+}
+
+.witch-character {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 224px;
+  height: 320px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  overflow: visible;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  pointer-events: auto;
+  transition: transform 180ms ease;
+}
+
+.witch-character:hover,
+.witch-character:focus-visible {
+  transform: translateY(-3px);
+}
+
+.witch-character-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: bottom center;
+  filter: drop-shadow(0 8px 10px rgb(20 16 10 / 8%));
+}
+
+/* 立绘、轮廓光和蓝方块共用同一个浮动容器，慢速呼吸时不会互相错位。 */
+.witch-portrait {
+  position: relative;
+  width: 224px;
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 720 / 710;
+  --witch-idle-distance: 6px;
+  animation: witch-fade 420ms ease-out both, witch-idle 7s ease-in-out infinite;
+}
+
+/* 头发边缘的弱光：同一张立绘加青色投影垫在底层，只动画透明度，不逐帧重算滤镜。 */
+.witch-character-glow {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: bottom center;
+  pointer-events: none;
+  opacity: 0;
+  filter: drop-shadow(0 0 4px rgb(150 225 245 / 62%))
+    drop-shadow(0 0 11px rgb(120 200 240 / 32%));
+  animation: witch-rim 7s ease-in-out infinite;
+}
+
+/* 悬空的蓝色方块是从立绘里抠出来的独立精灵，绕自身中心持续旋转。 */
+.witch-cube {
+  position: absolute;
+  left: 89.03%;
+  top: 47.11%;
+  width: 13.89%;
+  height: auto;
+  pointer-events: none;
+  transform: translate(-50%, -50%) rotate(-5deg);
+  animation: witch-cube-spin 18s linear infinite;
+}
+
+.witch-cube,
+.witch-character-glow {
+  visibility: hidden;
+}
+
+.witch-character.has-image .witch-cube,
+.witch-character.has-image .witch-character-glow {
+  visibility: visible;
+}
+
+.witch-fallback {
+  display: flex;
+  width: 78px;
+  height: 78px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--accent);
+  font-size: 30px;
+  box-shadow: 0 8px 18px rgb(20 16 10 / 10%);
+}
+
+.witch-character.has-image .witch-fallback {
+  display: none;
+}
+
+.witch-hover-tip,
+.witch-intro-tip,
+.witch-event-tip {
+  position: absolute;
+  right: 122px;
+  bottom: 112px;
+  max-width: 156px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: nowrap;
+  box-shadow: 0 8px 20px rgb(20 16 10 / 8%);
+  pointer-events: none;
+}
+
+.witch-hover-tip {
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.witch-character:hover .witch-hover-tip,
+.witch-character:focus-visible .witch-hover-tip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.witch-intro-tip,
+.witch-event-tip {
+  right: 96px;
+  bottom: 228px;
+  color: var(--text);
+  opacity: 1;
+}
+
+.witch-intro-tip[hidden],
+.witch-event-tip[hidden] {
+  display: none;
+}
+
+.witch-event-tip {
+  max-width: 190px;
+  white-space: normal;
+}
+
+.witch-bubble {
+  position: absolute;
+  /* 立绘占满左侧 224px，气泡从立绘右缘外侧起排：
+     否则立绘盒子会盖住台词首字和第一个快捷按钮，并抢走点击。 */
+  left: 236px;
+  bottom: 104px;
+  width: min(320px, calc(100vw - 264px));
+  min-width: 220px;
+  padding: 13px 14px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 14px 34px rgb(20 16 10 / 13%);
+  z-index: 1;
+  opacity: 0;
+  transform: translateY(7px) scale(0.97);
+  transform-origin: 0 100%;
+  pointer-events: none;
+  transition: opacity 180ms ease, transform 200ms cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+.witch-assistant.is-open .witch-bubble {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.witch-assistant.is-speaking .witch-bubble {
+  border-color: var(--accent);
+}
+
+/* 自动发言保持成单纯台词；点击角色后才展开导航和控制项。 */
+.witch-assistant.is-speaking .witch-actions,
+.witch-assistant.is-speaking .witch-bubble-foot {
+  display: none;
+}
+
+.witch-assistant.is-speaking .witch-bubble {
+  width: min(280px, calc(100vw - 264px));
+  padding-bottom: 12px;
+}
+
+.witch-assistant.is-speaking .witch-dialogue {
+  min-height: 0;
+  margin-bottom: 0;
+}
+
+.witch-bubble-head,
+.witch-mobile-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.witch-name,
+.witch-mobile-title {
+  font-size: 14px;
+  letter-spacing: 0.08em;
+}
+
+.witch-role,
+.witch-mobile-role {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.witch-dialogue,
+.witch-mobile-dialogue {
+  min-height: 2.8em;
+  margin: 9px 0 10px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.witch-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.witch-action,
+.witch-mobile-action,
+.witch-mobile-close,
+.witch-restore,
+.witch-menu-entry {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.witch-action:hover,
+.witch-action:focus-visible,
+.witch-mobile-action:hover,
+.witch-mobile-action:focus-visible,
+.witch-mobile-close:hover,
+.witch-mobile-close:focus-visible,
+.witch-menu-entry:hover,
+.witch-menu-entry:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-weak);
+}
+
+.witch-action-muted {
+  color: var(--muted);
+}
+
+.witch-bubble-foot {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.witch-bubble-foot .witch-action {
+  min-height: 30px;
+  padding: 3px 8px;
+}
+
+.witch-bubble-foot .witch-action-muted[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.witch-restore {
+  position: absolute;
+  right: 0;
+  bottom: 3px;
+  display: grid;
+  width: 42px;
+  height: 42px;
+  min-height: 42px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--accent);
+  font-size: 20px;
+  box-shadow: 0 8px 20px rgb(20 16 10 / 12%);
+  pointer-events: auto;
+}
+
+.witch-restore[hidden] {
+  display: none;
+}
+
+.witch-mobile-panel {
+  display: none;
+}
+
+@keyframes witch-idle {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(calc(var(--witch-idle-distance) * -1));
+  }
+}
+
+@keyframes witch-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes witch-rim {
+  0%,
+  100% {
+    opacity: 0.14;
+  }
+  45% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes witch-cube-spin {
+  from {
+    transform: translate(-50%, -50%) rotate(-5deg);
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(355deg);
+  }
+}
+
+/* 宽屏采用左侧大立绘。这里判断的是浏览器的实际 CSS 宽度，而非显示器的
+   物理分辨率：系统/浏览器缩放后的 1920px 级桌面仍应获得完整立绘。较窄或
+   较矮的窗口则退为右下角小入口，避免影响分屏、笔记本和短屏阅读。 */
+@media (min-width: 781px) and (max-width: 1439px),
+  (min-width: 781px) and (max-height: 699px) {
+  .witch-assistant,
+  .witch-assistant.is-sidebar-collapsed {
+    left: auto;
+    right: 0;
+    bottom: 12px;
+    width: 72px;
+    height: 72px;
+  }
+
+  .witch-figure,
+  .witch-character {
+    width: 72px;
+    height: 72px;
+  }
+
+  .witch-character-image {
+    max-width: 100%;
+    height: 100%;
+  }
+
+  .witch-portrait {
+    width: 72px;
+    --witch-idle-distance: 3px;
+  }
+
+  /* 迷你入口只有 72px，抠图方块和轮廓光放大后只会变成噪点。 */
+  .witch-cube,
+  .witch-character-glow {
+    display: none;
+  }
+
+  .witch-fallback {
+    width: 56px;
+    height: 56px;
+    font-size: 22px;
+  }
+
+  .witch-hover-tip,
+  .witch-intro-tip,
+  .witch-event-tip {
+    display: none;
+  }
+
+  .witch-bubble {
+    right: 0;
+    left: auto;
+    bottom: 82px;
+    width: min(320px, calc(100vw - 24px));
+    min-width: min(220px, calc(100vw - 24px));
+    transform-origin: 100% 100%;
+  }
+}
+
+/* 大立绘时把对话框放到立绘头肩上方，而不是向右伸进正文列。bottom 使用
+   容器高度的比例，不依赖某个显示器的固定像素高度，因此缩放或改动立绘尺寸
+   时，气泡仍会跟随人物而不会悬在远处。 */
+@media (min-width: 1440px) and (min-height: 700px) {
+  .witch-bubble {
+    left: 0;
+    right: auto;
+    bottom: 67.5%;
+    width: min(300px, calc(100vw - 32px));
+    min-width: min(220px, calc(100vw - 32px));
+    transform-origin: 0 100%;
+  }
+
+  .witch-assistant.is-speaking .witch-bubble {
+    width: min(280px, calc(100vw - 32px));
+  }
+}
+
+@media (max-width: 780px) {
+  .witch-assistant {
+    display: none;
+  }
+
+  .top-menu .witch-menu-entry {
+    display: block;
+    width: 100%;
+    min-height: 42px;
+    padding: 8px 12px;
+    border: 0;
+    border-top: 1px solid var(--line);
+    border-radius: 0;
+    background: none;
+    text-align: left;
+  }
+
+  .top-menu .witch-menu-entry[hidden] {
+    display: none;
+  }
+
+  .witch-mobile-panel {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: calc(52px + env(safe-area-inset-bottom, 0px) + 8px);
+    z-index: 17;
+    display: block;
+    max-height: min(46vh, 360px);
+    overflow: auto;
+    padding: 13px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel);
+    color: var(--text);
+    box-shadow: 0 14px 34px rgb(20 16 10 / 16%);
+  }
+
+  .witch-mobile-panel[hidden] {
+    display: none;
+  }
+
+  .witch-mobile-head {
+    align-items: center;
+  }
+
+  .witch-mobile-avatar {
+    display: grid;
+    width: 38px;
+    height: 38px;
+    margin-right: 2px;
+    place-items: center;
+    border: 1px solid var(--line-strong);
+    border-radius: 50%;
+    color: var(--accent);
+    font-size: 18px;
+  }
+
+  .witch-mobile-title-wrap {
+    display: grid;
+    gap: 1px;
+    flex: 1;
+  }
+
+  .witch-mobile-close {
+    min-width: 56px;
+    min-height: 40px;
+    padding: 5px 8px;
+  }
+
+  .witch-mobile-dialogue {
+    min-height: 0;
+    margin: 12px 0;
+  }
+
+  .witch-mobile-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .witch-mobile-action {
+    min-height: 44px;
+    padding: 5px 4px;
+  }
+}
+
+@media (min-width: 781px) {
+  .top-menu .witch-menu-entry {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .witch-character-image,
+  .witch-portrait,
+  .witch-character-glow,
+  .witch-cube,
+  .witch-bubble,
+  .witch-hover-tip {
+    animation: none;
+    transition: none;
   }
 }

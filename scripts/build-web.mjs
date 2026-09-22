@@ -7,8 +7,21 @@ const ROOT = process.cwd();
 const ENV_ID = process.env.CLOUDBASE_ENV || "";
 const API_URL = process.env.CLOUDBASE_API_URL || "";
 const BRAND_ASSET = path.join(ROOT, "viewer", "assets", "archive-brand.webp");
+const WITCH_SCRIPT = path.join(ROOT, "viewer", "witch-assistant.js");
+const WITCH_DESKTOP_ASSET = path.join(
+  ROOT,
+  "viewer",
+  "assets",
+  "witch-desktop-v2.webp",
+);
+const WITCH_CUBE_ASSET = path.join(
+  ROOT,
+  "viewer",
+  "assets",
+  "witch-cube-v1.webp",
+);
 const BRAND_URL = "./archive-brand.webp?v=20260921-brand";
-const STATIC_VERSION = "20260921-lazy-load";
+const STATIC_VERSION = "20260921-witch-v5";
 const PUBLIC_ORIGIN = String(process.env.ARCHIVE_PUBLIC_ORIGIN || "").replace(/\/+$/, "");
 if (!ENV_ID || !API_URL) {
   console.error(
@@ -37,6 +50,7 @@ const cloudClient = fs.readFileSync(
   "utf8",
 );
 const js = fs.readFileSync(path.join(ROOT, "viewer", "viewer.js"), "utf8");
+const witchScript = fs.readFileSync(WITCH_SCRIPT, "utf8");
 const offline = fs.readFileSync(
   path.join(ROOT, "dist", "幻梦境档案馆.html"),
   "utf8",
@@ -61,7 +75,7 @@ const webPayload = JSON.stringify(webPayloadObject)
   .replace(/</g, "\\u003c")
   .replace(/\u2028/g, "\\u2028")
   .replace(/\u2029/g, "\\u2029");
-const dataScript = `window.ARCHIVE_DATA = JSON.parse(${JSON.stringify(webPayload)});\n`;
+const dataScript = `window.ARCHIVE_STATIC_VERSION = ${JSON.stringify(STATIC_VERSION)};\nwindow.ARCHIVE_DATA = JSON.parse(${JSON.stringify(webPayload)});\n`;
 
 function writeArchiveContent(outputDir, payload) {
   const root = path.join(outputDir, "archive-content");
@@ -291,6 +305,7 @@ window.ARCHIVE_CLOUD = {
 </script>
 <script src="./archive-data.js?v=${STATIC_VERSION}"></script>
 <script src="./cloud-client.js?v=${STATIC_VERSION}"></script>
+<script src="./witch-assistant.js?v=${STATIC_VERSION}"></script>
 <script src="./viewer.js?v=${STATIC_VERSION}"></script>
 </body>
 </html>
@@ -301,6 +316,7 @@ fs.mkdirSync(outDir, { recursive: true });
 fs.writeFileSync(path.join(outDir, "index.html"), html, "utf8");
 fs.writeFileSync(path.join(outDir, "viewer.css"), css, "utf8");
 fs.writeFileSync(path.join(outDir, "cloud-client.js"), cloudClient, "utf8");
+fs.writeFileSync(path.join(outDir, "witch-assistant.js"), witchScript, "utf8");
 fs.writeFileSync(path.join(outDir, "viewer.js"), js, "utf8");
 fs.writeFileSync(path.join(outDir, "archive-data.js"), dataScript, "utf8");
 const archiveContent = writeArchiveContent(outDir, fullPayload);
@@ -312,6 +328,22 @@ if (fs.existsSync(archiveAssets)) {
 }
 if (!fs.existsSync(BRAND_ASSET)) throw new Error(`缺少品牌素材：${BRAND_ASSET}`);
 fs.copyFileSync(BRAND_ASSET, path.join(outDir, "archive-brand.webp"));
+if (!fs.existsSync(WITCH_DESKTOP_ASSET)) {
+  throw new Error(`缺少小女巫桌面素材：${WITCH_DESKTOP_ASSET}`);
+}
+if (!fs.existsSync(WITCH_CUBE_ASSET)) {
+  throw new Error(`缺少小女巫方块素材：${WITCH_CUBE_ASSET}`);
+}
+const witchAssetDir = path.join(outDir, "assets");
+fs.mkdirSync(witchAssetDir, { recursive: true });
+fs.copyFileSync(
+  WITCH_DESKTOP_ASSET,
+  path.join(witchAssetDir, "witch-desktop-v2.webp"),
+);
+fs.copyFileSync(
+  WITCH_CUBE_ASSET,
+  path.join(witchAssetDir, "witch-cube-v1.webp"),
+);
 fs.rmSync(path.join(outDir, "archive-brand.png"), { force: true });
 console.log("web out=", path.join(outDir, "index.html"));
 console.log("envId=", ENV_ID);
@@ -338,3 +370,5 @@ console.log(
   "MB",
 );
 console.log("size=", (Buffer.byteLength(html) / 1024 / 1024).toFixed(2), "MB");
+console.log("witch asset=", path.join(witchAssetDir, "witch-desktop-v2.webp"));
+console.log("witch cube=", path.join(witchAssetDir, "witch-cube-v1.webp"));

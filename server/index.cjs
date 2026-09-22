@@ -901,17 +901,32 @@ async function sendVerificationMail(qq, code) {
   const t = await getTransporter();
   if (!t) throw new Error("邮件服务尚未配置");
   const minutes = Math.round(CODE_TTL_MS / 60000);
-  const text =
-    "你的幻梦境档案馆注册验证码是：\n\n" +
-    code +
-    "\n\n" +
-    minutes +
-    " 分钟内有效。\n如果不是你本人操作，请忽略此邮件。\n";
+  // QQ 邮箱的通知预览会折叠纯文本换行，因此首行本身必须能完整表达
+  // “验证码”和有效期，不能依赖空行把六码与“10 分钟”隔开。
+  const summary = "验证码：" + code + "（" + minutes + " 分钟内有效）";
+  const text = [
+    summary,
+    "",
+    "请在幻梦境档案馆的注册页面输入此验证码。",
+    "如果不是你本人操作，请忽略此邮件。",
+  ].join("\n");
+  const html = [
+    '<!doctype html><html lang="zh-CN"><body style="margin:0;padding:24px;background:#f5f3ef;color:#292522;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Microsoft YaHei\',sans-serif;">',
+    '<main style="max-width:520px;margin:0 auto;padding:32px;background:#fffdf9;border:1px solid #e5dfd7;border-radius:12px;">',
+    '<p style="margin:0 0 8px;color:#9a4a39;font-size:13px;letter-spacing:.12em;">幻梦境档案馆</p>',
+    '<h1 style="margin:0 0 20px;font-size:24px;line-height:1.35;">注册验证码</h1>',
+    '<p style="margin:0 0 14px;font-size:16px;line-height:1.7;">请在注册页面输入以下验证码：</p>',
+    '<div style="margin:0 0 16px;padding:16px 20px;border:1px solid #d8c7bb;border-radius:8px;background:#f8f3ed;color:#9a4a39;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:32px;font-weight:700;letter-spacing:.16em;text-align:center;">' + code + '</div>',
+    '<p style="margin:0 0 20px;font-size:15px;line-height:1.7;"><strong>有效期：</strong>' + minutes + ' 分钟</p>',
+    '<p style="margin:0;padding-top:16px;border-top:1px solid #eee7df;color:#706a64;font-size:13px;line-height:1.7;">如果不是你本人操作，请忽略此邮件。</p>',
+    '</main></body></html>',
+  ].join("");
   await t.sendMail({
     from: '"' + SMTP_CONFIG.fromName + '" <' + SMTP_CONFIG.user + ">",
     to: qq + "@qq.com",
     subject: "幻梦境档案馆注册验证码",
     text: text,
+    html: html,
   });
 }
 
