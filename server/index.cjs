@@ -305,6 +305,7 @@ function defaultSettings() {
     adminDirectory: getInitialAdminQQs(),
     editions: {},
     authorBindings: {},
+    awardConfigs: {},
     spotlight: { editions: {} },
   };
 }
@@ -315,6 +316,9 @@ function getSettings() {
     try {
       const parsed = JSON.parse(row.value);
       if (!Array.isArray(parsed.adminDirectory)) parsed.adminDirectory = [];
+      if (!parsed.awardConfigs || typeof parsed.awardConfigs !== "object") {
+        parsed.awardConfigs = {};
+      }
       if (!parsed.spotlight || typeof parsed.spotlight !== "object") {
         parsed.spotlight = { editions: {} };
       }
@@ -1096,6 +1100,48 @@ function reportWorkStats(editionSlug) {
   `).all(prefix, prefix, prefix, prefix, prefix, prefix);
 }
 
+function editionLeaderboard(editionSlug) {
+  return reportWorkStats(editionSlug)
+    .filter((row) => Number(row.ratingCount) > 0)
+    .sort((a, b) =>
+      Number(b.totalAvg) - Number(a.totalAvg) ||
+      Number(b.ratingCount) - Number(a.ratingCount) ||
+      a.workId.localeCompare(b.workId),
+    )
+    .map((row, index) => ({
+      rank: index + 1,
+      workId: row.workId,
+      ratingCount: row.ratingCount,
+      totalAvg: row.totalAvg,
+    }));
+}
+
+function emptyAwardConfig() {
+  return { authorRevealRankLimit: 25, specialAwards: [] };
+}
+
+function saveableAwardConfig(editionSlug, incoming) {
+  const catalogueIds = new Set(manifestCatalogueIds(editionSlug));
+  const rankLimit = Number(incoming && incoming.authorRevealRankLimit);
+  if (!Number.isInteger(rankLimit) || rankLimit < 0 || rankLimit > catalogueIds.size) {
+    throw new Error("作者公开名次上限无效");
+  }
+  const rawAwards = Array.isArray(incoming && incoming.specialAwards)
+    ? incoming.specialAwards
+    : [];
+  if (rawAwards.length > 6) throw new Error("本届最多设置 6 项特别奖");
+  const specialAwards = rawAwards.map((award) => {
+    const name = String((award && award.name) || "").trim().slice(0, 100);
+    const workId = String((award && award.workId) || "").trim();
+    const excerpt = String((award && award.excerpt) || "").trim().slice(0, 3000);
+    const review = String((award && award.review) || "").trim().slice(0, 30000);
+    if (!name || !workId) throw new Error("每项特别奖都需要填写奖项名称和获奖作品");
+    if (!catalogueIds.has(workId)) throw new Error("特别奖作品不属于当前届");
+    return { name, workId, excerpt, review };
+  });
+  return { authorRevealRankLimit: rankLimit, specialAwards };
+}
+
 function reportSummary() {
   return {
     users: Number(db.prepare("SELECT COUNT(*) AS c FROM users").get().c),
@@ -1179,17 +1225,48 @@ async function handle(action, payload, auth, ctx) {
       return {
         rankingsAvailable,
         heat,
-        leaderboard: rankingsAvailable
-          ? workStats
-              .filter((row) => Number(row.ratingCount) > 0)
-              .sort((a, b) => Number(b.totalAvg) - Number(a.totalAvg) || Number(b.ratingCount) - Number(a.ratingCount) || a.workId.localeCompare(b.workId))
-              .map((row, index) => ({
-                rank: index + 1,
-                workId: row.workId,
-                ratingCount: row.ratingCount,
-                totalAvg: row.totalAvg,
-              }))
-          : [],
+        leaderboard: rankingsAvailable ? editionLeaderboard(editionSlug) : [],
+      };
+    }
+
+    case "getEditionAwards": {
+      const editionSlug = String(payload.editionSlug || "").trim();
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(editionSlug)) throw new Error("届别编号无效");
+      if (editionState(settings, editionSlug).phase !== "公示") {
+        return { published: false, authorRevealRankLimit: 0, awardedWorkIds: [], authorReveals: {}, specialAwards: [] };
+      }
+      const config = settings.awardConfigs && settings.awardConfigs[editionSlug];
+      if (!config) {
+        return { published: true, authorRevealRankLimit: 0, awardedWorkIds: [], authorReveals: {}, specialAwards: [] };
+      }
+      const catalogueIds = new Set(manifestCatalogueIds(editionSlug));
+      const specialAwards = (Array.isArray(config.specialAwards) ? config.specialAwards : [])
+        .filter((award) => award && catalogueIds.has(String(award.workId || "")))
+        .map((award) => ({
+          name: String(award.name || ""),
+          workId: String(award.workId || ""),
+          excerpt: String(award.excerpt || ""),
+          review: String(award.review || ""),
+        }));
+      const rankLimit = Math.max(0, Math.min(catalogueIds.size, Number(config.authorRevealRankLimit) || 0));
+      const revealIds = new Set(
+        editionLeaderboard(editionSlug).slice(0, rankLimit).map((row) => row.workId),
+      );
+      specialAwards.forEach((award) => revealIds.add(award.workId));
+      const authorReveals = {};
+      const bindings = settings.authorBindings || {};
+      revealIds.forEach((workId) => {
+        const qq = String(bindings[workId] || "");
+        if (!qq) return;
+        const author = getUser(qq);
+        if (author && author.nickname) authorReveals[workId] = author.nickname;
+      });
+      return {
+        published: true,
+        authorRevealRankLimit: rankLimit,
+        awardedWorkIds: Array.from(revealIds),
+        authorReveals,
+        specialAwards,
       };
     }
 
@@ -1821,6 +1898,26 @@ async function handle(action, payload, auth, ctx) {
           enabled: !!r.enabled,
         })),
       };
+    }
+
+    case "adminGetEditionAwardsConfig": {
+      if (!user || session.role !== "admin") throw new Error("需要管理员");
+      const editionSlug = String(payload.editionSlug || "").trim();
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(editionSlug)) throw new Error("届别编号无效");
+      return {
+        config: (settings.awardConfigs && settings.awardConfigs[editionSlug]) || emptyAwardConfig(),
+      };
+    }
+
+    case "adminSaveEditionAwardsConfig": {
+      if (!user || session.role !== "admin") throw new Error("需要管理员");
+      const editionSlug = String(payload.editionSlug || "").trim();
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(editionSlug)) throw new Error("届别编号无效");
+      const config = saveableAwardConfig(editionSlug, payload.config || {});
+      if (!settings.awardConfigs || typeof settings.awardConfigs !== "object") settings.awardConfigs = {};
+      settings.awardConfigs[editionSlug] = config;
+      saveSettings(settings);
+      return { config };
     }
 
     case "adminGetReport": {

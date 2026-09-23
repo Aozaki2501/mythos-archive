@@ -245,6 +245,7 @@
       adminDirectory: [DEFAULT_ADMIN_QQ],
       editions: {},
       authorBindings: {},
+      awardConfigs: {},
       spotlight: { editions: {} },
     };
   }
@@ -300,6 +301,7 @@
           : [DEFAULT_ADMIN_QQ],
       editions: old.editions || {},
       authorBindings: old.authorBindings || {},
+      awardConfigs: old.awardConfigs || {},
       spotlight: old.spotlight || { editions: {} },
     });
     if (!Object.keys(base.settings.editions).length) {
@@ -850,6 +852,9 @@
   var cloudInsightsLoaded = {};
   var cloudInsightsInflight = {};
   var cloudInsights = {};
+  var cloudAwardsLoaded = {};
+  var cloudAwardsInflight = {};
+  var cloudAwards = {};
   var cloudContent = {};
   var staticContent = {};
   var staticContentInflight = {};
@@ -1189,6 +1194,86 @@
     return cloudInsightsInflight[editionSlug];
   }
 
+  function loadCloudEditionAwards(editionSlug, force) {
+    if (!USE_CLOUD) return Promise.resolve(null);
+    if (!force && cloudAwardsLoaded[editionSlug]) {
+      return Promise.resolve(cloudAwards[editionSlug]);
+    }
+    if (!force && cloudAwardsInflight[editionSlug]) {
+      return cloudAwardsInflight[editionSlug];
+    }
+    cloudAwardsInflight[editionSlug] = window.MythosCloud
+      .call("getEditionAwards", { editionSlug: editionSlug })
+      .then(function (data) {
+        cloudAwards[editionSlug] = data || { published: false, authorReveals: {}, specialAwards: [] };
+        cloudAwardsLoaded[editionSlug] = true;
+        return cloudAwards[editionSlug];
+      })
+      .then(
+        function (data) {
+          delete cloudAwardsInflight[editionSlug];
+          return data;
+        },
+        function (err) {
+          delete cloudAwardsInflight[editionSlug];
+          throw err;
+        },
+      );
+    return cloudAwardsInflight[editionSlug];
+  }
+
+  function editionAwardsData(editionSlug) {
+    if (USE_CLOUD) return cloudAwards[editionSlug] || null;
+    if (!isPublicPhase(editionSlug)) return null;
+    var config =
+      store.settings.awardConfigs && store.settings.awardConfigs[editionSlug];
+    if (!config) return null;
+    var edition = findEdition(editionSlug);
+    var ranked = edition
+      ? edition.works
+          .map(function (work) {
+            return {
+              work: work,
+              id: workId(editionSlug, work.slug),
+              stats: averages(workId(editionSlug, work.slug)),
+            };
+          })
+          .filter(function (row) { return row.stats.count > 0; })
+          .sort(function (a, b) {
+            return b.stats.overall - a.stats.overall ||
+              b.stats.count - a.stats.count ||
+              a.id.localeCompare(b.id);
+          })
+      : [];
+    var specialAwards = config.specialAwards || [];
+    var revealIds = new Set(
+      ranked.slice(0, Number(config.authorRevealRankLimit) || 0).map(function (row) { return row.id; }),
+    );
+    specialAwards.forEach(function (award) { if (award && award.workId) revealIds.add(award.workId); });
+    var authorReveals = {};
+    revealIds.forEach(function (id) {
+      var slug = id.slice(editionSlug.length + 1);
+      var work = edition && findWork(edition, slug);
+      var qq = work && effectiveAuthorQQ(id, work);
+      var author = qq && store.users[qq];
+      if (author && author.nickname) authorReveals[id] = author.nickname;
+    });
+    return {
+      published: true,
+      authorRevealRankLimit: Number(config.authorRevealRankLimit) || 0,
+      authorReveals: authorReveals,
+      awardedWorkIds: Array.from(revealIds),
+      specialAwards: specialAwards,
+    };
+  }
+
+  function revealedAuthorName(editionSlug, id) {
+    var result = editionAwardsData(editionSlug);
+    return result && result.published && result.authorReveals
+      ? String(result.authorReveals[id] || "")
+      : "";
+  }
+
   function clearCloudCaches() {
     cloudBundleLoaded = {};
     cloudStarsLoaded = {};
@@ -1201,6 +1286,9 @@
     cloudInsightsLoaded = {};
     cloudInsightsInflight = {};
     cloudInsights = {};
+    cloudAwardsLoaded = {};
+    cloudAwardsInflight = {};
+    cloudAwards = {};
     cloudUserList = [];
   }
 
@@ -2068,6 +2156,7 @@
     topMenu: document.getElementById("top-menu"),
     topJump: document.getElementById("top-jump"),
     topGlobalSearch: document.getElementById("top-global-search"),
+    topResults: document.getElementById("top-results"),
     authGate: document.getElementById("auth-gate"),
     accountBar: document.getElementById("account-bar"),
     accountHud: document.getElementById("account-hud"),
@@ -3409,6 +3498,22 @@
     }
 
     body.appendChild(el("hr", "modal-rule"));
+    body.appendChild(el("h3", "modal-sub", "匿名规则与评委特别奖"));
+    body.appendChild(
+      el(
+        "p",
+        "modal-meta",
+        "不展示捐赠奖品。设置作者公开名次，并在结果公示时展示特别奖与评语。",
+      ),
+    );
+    var awardConfigButton = el("button", "btn-ghost", "配置匿名规则与特别奖");
+    awardConfigButton.type = "button";
+    awardConfigButton.addEventListener("click", function () {
+      openEditionAwardConfigModal(slug);
+    });
+    body.appendChild(awardConfigButton);
+
+    body.appendChild(el("hr", "modal-rule"));
     body.appendChild(el("h3", "modal-sub", "首页聚光"));
     body.appendChild(
       el(
@@ -3578,6 +3683,232 @@
     body.appendChild(contentBlock);
 
     openModal("管理面板", body);
+  }
+
+  function openEditionAwardConfigModal(editionSlug) {
+    if (!isAdmin()) return;
+    var edition = findEdition(editionSlug);
+    if (!edition) return;
+    var loading = el("div", "modal-body");
+    loading.appendChild(el("p", "modal-meta", "正在读取匿名规则与特别奖…"));
+    openModal("匿名规则与评委特别奖", loading);
+
+    var load = USE_CLOUD
+      ? window.MythosCloud.call("adminGetEditionAwardsConfig", {
+          editionSlug: editionSlug,
+        })
+      : Promise.resolve({
+          config:
+            (store.settings.awardConfigs && store.settings.awardConfigs[editionSlug]) ||
+            { authorRevealRankLimit: 25, specialAwards: [] },
+        });
+    load.then(function (data) {
+      renderEditor((data && data.config) || { authorRevealRankLimit: 25, specialAwards: [] });
+    }).catch(function (err) {
+      var fail = el("div", "modal-body");
+      fail.appendChild(backToAdminButton());
+      fail.appendChild(el("p", "auth-error", err.message || String(err)));
+      openModal("匿名规则与评委特别奖", fail);
+    });
+
+    function renderEditor(config) {
+      var awards = Array.isArray(config.specialAwards)
+        ? config.specialAwards.slice(0, 6).map(function (award) {
+            return {
+              name: String((award && award.name) || ""),
+              workId: String((award && award.workId) || ""),
+              excerpt: String((award && award.excerpt) || ""),
+              review: String((award && award.review) || ""),
+            };
+          })
+        : [];
+      var body = el("div", "modal-body award-config-modal");
+      body.appendChild(backToAdminButton());
+      body.appendChild(
+        el(
+          "p",
+          "modal-meta",
+          "奖品清单和捐赠信息不公开。获奖作者在公示阶段解封；特别奖作品不受名次上限限制。",
+        ),
+      );
+
+      var rankField = el("label", "field-label", "作者公开名次上限");
+      var rankInput = el("input", "auth-input");
+      rankInput.type = "number";
+      rankInput.min = "0";
+      rankInput.max = String((edition.works || []).length);
+      rankInput.step = "1";
+      rankInput.value = String(
+        config.authorRevealRankLimit == null ? 25 : config.authorRevealRankLimit,
+      );
+      rankField.appendChild(rankInput);
+      body.appendChild(rankField);
+      body.appendChild(
+        el(
+          "p",
+          "modal-meta",
+          "例如填 25，表示前 25 名可以公开作者；第 26 名及以后匿名。特别奖获奖作品会在公示时解封作者。作者昵称取自现有作者 QQ 绑定，请先确认获奖作品已绑定。",
+        ),
+      );
+
+      body.appendChild(el("h3", "modal-sub", "特别奖（最多 6 项）"));
+      var awardList = el("div", "award-editor-list");
+      body.appendChild(awardList);
+      var boundAuthors = {};
+      authorBindRows(edition).forEach(function (row) {
+        boundAuthors[row.id] = !!row.qq;
+      });
+      var addAward = el("button", "btn-ghost", "添加特别奖");
+      addAward.type = "button";
+      body.appendChild(addAward);
+      var error = el("p", "auth-error");
+      error.hidden = true;
+      body.appendChild(error);
+      var status = el("p", "modal-meta");
+      body.appendChild(status);
+      var save = el("button", "btn", "保存本届设置");
+      save.type = "button";
+      body.appendChild(save);
+      openModal("匿名规则与评委特别奖", body);
+
+      function paintAwards() {
+        clear(awardList);
+        awards.forEach(function (award, index) {
+          var details = el("details", "award-editor-item");
+          if (index === 0) details.open = true;
+          var summary = el("summary", null, "特别奖 " + (index + 1) + " · " + (award.name || "未命名"));
+          details.appendChild(summary);
+          var fields = el("div", "award-editor-fields");
+
+          var nameLabel = el("label", "field-label", "奖项名称");
+          var nameInput = el("input", "auth-input");
+          nameInput.type = "text";
+          nameInput.maxLength = 100;
+          nameInput.value = award.name;
+          nameInput.placeholder = "例如：暗夜呢喃奖";
+          nameInput.addEventListener("input", function () {
+            summary.textContent = "特别奖 " + (index + 1) + " · " + (nameInput.value.trim() || "未命名");
+          });
+          nameLabel.appendChild(nameInput);
+          fields.appendChild(nameLabel);
+
+          var workLabel = el("label", "field-label", "获奖作品");
+          var workSelect = el("select", "auth-input");
+          var emptyOption = el("option", null, "请选择作品");
+          emptyOption.value = "";
+          workSelect.appendChild(emptyOption);
+          (edition.works || []).forEach(function (work) {
+            var id = workId(edition.slug, work.slug);
+            var option = el(
+              "option",
+              null,
+              String(work.no).padStart(2, "0") +
+                " · " +
+                work.title +
+                (boundAuthors[id] ? " · 已绑定作者" : " · 未绑定作者"),
+            );
+            option.value = id;
+            if (id === award.workId) option.selected = true;
+            workSelect.appendChild(option);
+          });
+          workLabel.appendChild(workSelect);
+          fields.appendChild(workLabel);
+
+          var excerptLabel = el("label", "field-label", "作品节选（可选）");
+          var excerptInput = el("textarea", "auth-textarea");
+          excerptInput.rows = 3;
+          excerptInput.maxLength = 3000;
+          excerptInput.value = award.excerpt;
+          excerptInput.placeholder = "可放一小段作品原文，评语 PDF 也采用了这种结构";
+          excerptLabel.appendChild(excerptInput);
+          fields.appendChild(excerptLabel);
+
+          var reviewLabel = el("label", "field-label", "评委评语");
+          var reviewInput = el("textarea", "auth-textarea");
+          reviewInput.rows = 8;
+          reviewInput.maxLength = 30000;
+          reviewInput.value = award.review;
+          reviewInput.placeholder = "可粘贴完整评语，多段评语之间空一行";
+          reviewLabel.appendChild(reviewInput);
+          fields.appendChild(reviewLabel);
+
+          var remove = el("button", "btn-ghost btn-tiny", "删除此特别奖");
+          remove.type = "button";
+          remove.addEventListener("click", function () {
+            awards.splice(index, 1);
+            paintAwards();
+          });
+          fields.appendChild(remove);
+          details.appendChild(fields);
+          awardList.appendChild(details);
+        });
+        addAward.disabled = awards.length >= 6;
+        addAward.textContent = "添加特别奖（" + awards.length + "/6）";
+      }
+
+      addAward.addEventListener("click", function () {
+        if (awards.length >= 6) return;
+        awards.push({ name: "", workId: "", excerpt: "", review: "" });
+        paintAwards();
+        var last = awardList.lastElementChild;
+        if (last) last.open = true;
+      });
+
+      save.addEventListener("click", function () {
+        error.hidden = true;
+        status.textContent = "";
+        var rankLimit = Number(rankInput.value);
+        if (!Number.isInteger(rankLimit) || rankLimit < 0 || rankLimit > (edition.works || []).length) {
+          error.textContent = "名次上限请填写 0 到 " + (edition.works || []).length + " 之间的整数。";
+          error.hidden = false;
+          return;
+        }
+        var nextAwards = [];
+        var rows = awardList.querySelectorAll(".award-editor-item");
+        for (var i = 0; i < rows.length; i++) {
+          var row = rows[i];
+          var name = row.querySelector('input[type="text"]').value.trim();
+          var workIdValue = row.querySelector("select").value;
+          var excerpt = row.querySelectorAll("textarea")[0].value.trim();
+          var review = row.querySelectorAll("textarea")[1].value.trim();
+          if (!name && !workIdValue && !excerpt && !review) continue;
+          if (!name || !workIdValue) {
+            error.textContent = "每项特别奖都需要填写奖项名称和获奖作品。";
+            error.hidden = false;
+            return;
+          }
+          nextAwards.push({ name: name, workId: workIdValue, excerpt: excerpt, review: review });
+        }
+        if (nextAwards.length > 6) {
+          error.textContent = "本届最多设置 6 项特别奖。";
+          error.hidden = false;
+          return;
+        }
+        var next = { authorRevealRankLimit: rankLimit, specialAwards: nextAwards };
+        save.disabled = true;
+        var request = USE_CLOUD
+          ? window.MythosCloud.call("adminSaveEditionAwardsConfig", {
+              editionSlug: editionSlug,
+              config: next,
+            })
+          : Promise.resolve({ config: next });
+        request.then(function (result) {
+          if (!store.settings.awardConfigs) store.settings.awardConfigs = {};
+          store.settings.awardConfigs[editionSlug] = (result && result.config) || next;
+          persist();
+          cloudAwardsLoaded[editionSlug] = false;
+          delete cloudAwards[editionSlug];
+          status.textContent = "设置已保存。特别奖只会在结果公示阶段显示。";
+          save.disabled = false;
+        }).catch(function (err) {
+          error.textContent = err.message || String(err);
+          error.hidden = false;
+          save.disabled = false;
+        });
+      });
+
+      paintAwards();
+    }
   }
 
   function csvValue(value) {
@@ -5486,17 +5817,31 @@
         });
       return;
     }
+    if (USE_CLOUD && isPublicPhase(edition.slug) && !cloudAwardsLoaded[edition.slug]) {
+      refs.content.appendChild(el("div", "sheet", "正在加载本届公示内容…"));
+      loadCloudEditionAwards(edition.slug)
+        .then(function () { renderResults(edition); })
+        .catch(function () {
+          cloudAwards[edition.slug] = { published: false, authorReveals: {}, specialAwards: [] };
+          cloudAwardsLoaded[edition.slug] = true;
+          renderResults(edition);
+        });
+      return;
+    }
+    var awardResult = editionAwardsData(edition.slug);
     var sheet = el("div", "sheet results-sheet");
     sheet.appendChild(el("h1", "intro-title", "投票公示 · " + edition.shortName));
     sheet.appendChild(renderPhaseChip(edition.slug));
+    var resultIntro = isPublicPhase(edition.slug)
+      ? "结果公示。下列为综合均分排名与分数分布。"
+      : "本届尚未进入结果公示。管理员可在管理面板双人确认推进阶段；下列为当前实时数据预览。";
+    if (awardResult && awardResult.published && isPublicPhase(edition.slug)) {
+      resultIntro += awardResult.authorRevealRankLimit
+        ? "前 " + awardResult.authorRevealRankLimit + " 名及特别奖作品公开作者，其余作品匿名。"
+        : "特别奖作品公开作者，其余作品匿名。";
+    }
     sheet.appendChild(
-      el(
-        "p",
-        "intro-text",
-        isPublicPhase(edition.slug)
-          ? "结果公示。下列为综合均分排名与分数分布。"
-          : "本届尚未进入结果公示。管理员可在管理面板双人确认推进阶段；下列为当前实时数据预览。",
-      ),
+      el("p", "intro-text", resultIntro),
     );
 
     var insight = cloudInsights[edition.slug] || null;
@@ -5507,18 +5852,27 @@
         var publicTable = el("table", "rank-table");
         var publicHead = el("thead");
         var publicHeadRow = el("tr");
-        ["名次", "编号", "标题", "综合均分", "评分人数"].forEach(function (label) { publicHeadRow.appendChild(el("th", null, label)); });
+        var publicColumns = ["名次", "编号", "标题"];
+        if (awardResult && awardResult.published) publicColumns.push("作者");
+        publicColumns.push("综合均分", "评分人数");
+        publicColumns.forEach(function (label) { publicHeadRow.appendChild(el("th", null, label)); });
         publicHead.appendChild(publicHeadRow); publicTable.appendChild(publicHead);
         var publicBody = el("tbody");
         (insight.leaderboard || []).forEach(function (row) {
           var work = edition.works.filter(function (item) { return workId(edition.slug, item.slug) === row.workId; })[0];
           if (!work) return;
           var tr = el("tr");
-          [row.rank, String(work.no).padStart(2, "0"), work.title, Number(row.totalAvg).toFixed(2), row.ratingCount].forEach(function (value) { tr.appendChild(el("td", null, String(value))); });
+          var values = [row.rank, String(work.no).padStart(2, "0"), work.title];
+          if (awardResult && awardResult.published) {
+            values.push((awardResult.authorReveals || {})[row.workId] || "匿名");
+          }
+          values.push(Number(row.totalAvg).toFixed(2), row.ratingCount);
+          values.forEach(function (value) { tr.appendChild(el("td", null, String(value))); });
           publicBody.appendChild(tr);
         });
         publicTable.appendChild(publicBody); sheet.appendChild(publicTable);
       }
+      renderSpecialAwardsSection(sheet, edition, awardResult);
       var heat = (insight && insight.heat) || [];
       if (heat.length) {
         sheet.appendChild(el("h2", "panel-title", "作品热度"));
@@ -5547,11 +5901,23 @@
         if (b.overall !== a.overall) return b.overall - a.overall;
         return a.work.no - b.work.no;
       });
+    var canonicalRanks = {};
+    if (insight && insight.rankingsAvailable) {
+      (insight.leaderboard || []).forEach(function (row) {
+        canonicalRanks[row.workId] = Number(row.rank);
+      });
+      ranked.sort(function (a, b) {
+        var aRank = canonicalRanks[a.id] || Infinity;
+        var bRank = canonicalRanks[b.id] || Infinity;
+        return aRank - bRank || (a.work.no - b.work.no);
+      });
+    }
 
     var table = el("table", "rank-table");
     var thead = el("thead");
     var hr = el("tr");
     var rankCols = ["名次", "编号", "标题", "传录", "档案", "综合"];
+    if (awardResult && awardResult.published) rankCols.splice(3, 0, "作者");
     if (isAdmin()) rankCols.push("人数");
     rankCols.forEach(function (h) {
       hr.appendChild(el("th", null, h));
@@ -5561,7 +5927,7 @@
     var tbody = el("tbody");
     ranked.forEach(function (row, index) {
       var tr = el("tr");
-      tr.appendChild(el("td", null, String(index + 1)));
+      tr.appendChild(el("td", null, String(canonicalRanks[row.id] || (insight && insight.rankingsAvailable ? "—" : index + 1))));
       tr.appendChild(el("td", null, String(row.work.no).padStart(2, "0")));
       var titleCell = el("td");
       var link = el("button", "linkish", row.work.title);
@@ -5572,6 +5938,11 @@
       });
       titleCell.appendChild(link);
       tr.appendChild(titleCell);
+      if (awardResult && awardResult.published) {
+        tr.appendChild(
+          el("td", null, (awardResult.authorReveals || {})[row.id] || "匿名"),
+        );
+      }
       DIMENSIONS.forEach(function (dim) {
         var v = row.stats[dim.key];
         tr.appendChild(el("td", null, v == null ? "—" : v.toFixed(2)));
@@ -5581,6 +5952,7 @@
     });
     table.appendChild(tbody);
     sheet.appendChild(table);
+    renderSpecialAwardsSection(sheet, edition, awardResult);
 
     sheet.appendChild(el("h2", "panel-title", "综合分分布（全作品合计）"));
     var globalBins = [0, 0, 0, 0, 0];
@@ -5612,6 +5984,58 @@
 
     refs.content.appendChild(sheet);
     window.scrollTo(0, 0);
+  }
+
+  function renderSpecialAwardsSection(parent, edition, result) {
+    if (!result || !result.published || !Array.isArray(result.specialAwards)) return;
+    var awards = result.specialAwards.filter(function (award) {
+      return award && award.name && award.workId;
+    });
+    if (!awards.length) return;
+    parent.appendChild(el("h2", "panel-title special-awards-title", "评委特别奖"));
+    parent.appendChild(
+      el("p", "rate-hint special-awards-intro", "由评委提名的独立奖项 · 作品与评语于本届公示阶段开放"),
+    );
+    var list = el("div", "special-awards-list");
+    awards.forEach(function (award) {
+      var work = (edition.works || []).filter(function (item) {
+        return workId(edition.slug, item.slug) === award.workId;
+      })[0];
+      if (!work) return;
+      var card = el("article", "special-award-item");
+      card.appendChild(el("p", "special-award-name", award.name));
+      var workLink = el("button", "linkish special-award-work", work.title);
+      workLink.type = "button";
+      workLink.addEventListener("click", function () {
+        location.hash = "#/" + edition.slug + "/" + encodeURIComponent(work.slug);
+      });
+      card.appendChild(workLink);
+      var author = (result.authorReveals || {})[award.workId] || "匿名";
+      card.appendChild(el("p", "special-award-author", author));
+      if (award.excerpt) {
+        var excerpt = el("blockquote", "special-award-excerpt");
+        excerpt.textContent = String(award.excerpt);
+        card.appendChild(excerpt);
+      }
+      if (award.review) {
+        var details = el("details", "special-award-review");
+        details.appendChild(el("summary", null, "阅读评委评语"));
+        var review = el("div", "special-award-review-body");
+        String(award.review)
+          .split(/\n\s*\n/)
+          .map(function (paragraph) { return paragraph.trim(); })
+          .filter(Boolean)
+          .forEach(function (paragraph) {
+            review.appendChild(el("p", null, paragraph));
+          });
+        details.appendChild(review);
+        card.appendChild(details);
+      } else {
+        card.appendChild(el("p", "special-award-review-pending", "评委评语整理中。"));
+      }
+      list.appendChild(card);
+    });
+    if (list.childElementCount) parent.appendChild(list);
   }
 
   function renderPieBlock(label, bins) {
@@ -5769,7 +6193,14 @@
 
   function setSiteNavActive(view) {
     if (!refs.siteNav) return;
-    var active = view === "home" ? "spotlight" : view === "edition" || view === "reader" ? "catalogue" : "";
+    var active =
+      view === "home"
+        ? "spotlight"
+        : view === "edition" || view === "reader"
+          ? "catalogue"
+          : view === "results"
+            ? "results"
+            : "";
     refs.siteNav.querySelectorAll("[data-nav]").forEach(function (button) {
       button.classList.toggle("is-active", button.dataset.nav === active);
     });
@@ -6383,6 +6814,10 @@
             location.hash = "#/" + state.editionSlug;
             return;
           }
+          if (nav === "results") {
+            navigateToPublicResults();
+            return;
+          }
           if (nav === "guide") {
             openGuideModal();
             return;
@@ -6403,6 +6838,9 @@
         openGlobalSearchModal();
       });
     }
+    if (refs.topResults) {
+      refs.topResults.addEventListener("click", navigateToPublicResults);
+    }
     if (refs.siteAccountLink) {
       refs.siteAccountLink.addEventListener("click", function () {
         if (!isLoggedIn()) {
@@ -6417,6 +6855,10 @@
   }
 
   function renderSiteBar() {
+    var publicEdition = getPublicResultsEdition();
+    var resultsEntry = refs.siteNav && refs.siteNav.querySelector('[data-nav="results"]');
+    if (resultsEntry) resultsEntry.hidden = !publicEdition;
+    if (refs.topResults) refs.topResults.hidden = !publicEdition;
     if (!refs.siteAccountLink) return;
     if (!isLoggedIn()) {
       refs.siteAccountLink.textContent = "调查员入口";
@@ -6427,6 +6869,19 @@
       ? "访客入口"
       : displayName(currentUser());
     refs.siteAccountLink.title = isVisitor() ? "访客账号" : "打开账号管理";
+  }
+
+  function getPublicResultsEdition() {
+    var edition = editions.filter(function (item) {
+      return item.works && item.works.length;
+    })[0] || editions[0];
+    return edition && isPublicPhase(edition.slug) ? edition : null;
+  }
+
+  function navigateToPublicResults() {
+    var edition = getPublicResultsEdition();
+    if (!edition) return;
+    location.hash = "#/" + edition.slug + "/__results";
   }
 
   function renderHomeCataloguePreview(edition) {
@@ -6824,8 +7279,10 @@
 
       head.appendChild(el("h1", "work-title", work.title));
 
+      var revealedAuthor = revealedAuthorName(edition.slug, id);
+      var anonymous = isAnonymousAuthor(work) && !revealedAuthor;
       var meta = el("p", "work-meta");
-      meta.appendChild(el("span", "work-meta-author", work.author));
+      meta.appendChild(el("span", "work-meta-author", revealedAuthor || work.author || "未见署名"));
       meta.appendChild(el("span", "work-meta-sep", "·"));
       meta.appendChild(
         el(
@@ -6844,14 +7301,24 @@
       }
       head.appendChild(meta);
 
-      if (isAnonymousAuthor(work)) {
+      if (anonymous) {
+        var publicAwards = editionAwardsData(edition.slug);
+        var wasAwarded =
+          publicAwards &&
+          publicAwards.published &&
+          Array.isArray(publicAwards.awardedWorkIds) &&
+          publicAwards.awardedWorkIds.indexOf(id) !== -1;
         head.appendChild(
           el(
             "p",
             "work-anon-note",
             isArchivedEdition(edition)
               ? "历史资料未载明作者，按原件封存"
-              : "身份将在结果公示后解封",
+              : isPublicPhase(edition.slug)
+                ? wasAwarded
+                  ? "本作已获奖，作者信息待补充"
+                  : "未获奖励的作品将匿名封存"
+                : "作者身份将在结果公示时按获奖范围解封",
           ),
         );
       }
@@ -6970,6 +7437,15 @@
         state.editionSlug === edition.slug && state.workSlug === work.slug
       );
     };
+    if (isPublicPhase(edition.slug) && isAnonymousAuthor(work) && !cloudAwardsLoaded[edition.slug]) {
+      loadCloudEditionAwards(edition.slug)
+        .then(function () {
+          if (stillHere()) paint(true);
+        })
+        .catch(function (e) {
+          console.error(e);
+        });
+    }
     if (isArchivedEdition(edition) && !cloudContent[id]) {
       loadStaticWorkContent(id)
         .then(function (content) {

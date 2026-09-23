@@ -1860,6 +1860,10 @@ body:has(.layout.sidebar-collapsed) .hud-pager {
   display: none;
 }
 
+.top-results {
+  display: none;
+}
+
 /* ---------- 右上账号管理 HUD ---------- */
 
 .account-hud {
@@ -2684,6 +2688,112 @@ textarea:focus-visible,
   margin-bottom: 22px;
 }
 
+.special-awards-title {
+  margin-top: 34px;
+}
+
+.special-awards-intro {
+  margin: -14px 0 8px;
+}
+
+.special-awards-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 28px;
+  margin: 0 0 30px;
+}
+
+.special-award-item {
+  min-width: 0;
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+}
+
+.special-award-name {
+  margin: 0 0 8px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+
+.special-award-work {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.special-award-author,
+.special-award-review-pending {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.special-award-excerpt {
+  margin: 14px 0;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--line-strong);
+  color: var(--muted);
+  font-family: var(--article-font);
+  font-size: 14px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+.special-award-review {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.special-award-review summary {
+  padding: 10px 0 2px;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.special-award-review-body {
+  padding: 4px 0 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.85;
+}
+
+.special-award-review-body p {
+  margin: 10px 0;
+  white-space: pre-wrap;
+}
+
+.award-editor-list {
+  display: grid;
+  gap: 8px;
+}
+
+.award-editor-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.award-editor-item > summary {
+  padding: 11px 12px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.award-editor-fields {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.award-editor-fields .field-label,
+.award-config-modal > .field-label {
+  display: grid;
+  gap: 4px;
+}
+
 .like-row {
   display: flex;
   align-items: center;
@@ -2776,6 +2886,7 @@ textarea:focus-visible,
   /* 菜单项：整行、左对齐、无边框，读起来像操作清单而不是一排药丸 */
   .top-menu .top-jump:not([hidden]),
   .top-menu .top-global-search,
+  .top-menu .top-results:not([hidden]),
   .top-menu .theme-toggle,
   .top-menu .account-hud-btn {
     display: block;
@@ -2838,6 +2949,10 @@ textarea:focus-visible,
     display: block;
     overflow-x: auto;
     white-space: nowrap;
+  }
+
+  .special-awards-list {
+    grid-template-columns: 1fr;
   }
 
   .public-stats-grid {

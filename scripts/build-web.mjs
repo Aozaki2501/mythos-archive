@@ -21,7 +21,7 @@ const WITCH_CUBE_ASSET = path.join(
   "witch-cube-v1.webp",
 );
 const BRAND_URL = "./archive-brand.webp?v=20260921-brand";
-const STATIC_VERSION = "20260923-rating-achievements-v5";
+const STATIC_VERSION = "20260923-public-results-entry-v1";
 const PUBLIC_ORIGIN = String(process.env.ARCHIVE_PUBLIC_ORIGIN || "").replace(/\/+$/, "");
 if (!ENV_ID || !API_URL) {
   console.error(
@@ -67,6 +67,13 @@ const webPayloadObject = {
     ...edition,
     works: (edition.works || []).map((work) => {
       const { html, sections, authorQQ, ...catalogueWork } = work;
+      const anonymous =
+        edition.status !== "archived" ||
+        !catalogueWork.author ||
+        catalogueWork.authorStatus === "anonymous" ||
+        catalogueWork.author === "未见署名" ||
+        catalogueWork.author === "匿名";
+      if (anonymous) catalogueWork.author = "未见署名";
       return catalogueWork;
     }),
   })),
@@ -124,17 +131,18 @@ function publicUrl(pathname) {
 
 function renderPrerenderArticle(edition, work) {
   const anonymous =
+    edition.status !== "archived" ||
     !work.author ||
     work.authorStatus === "anonymous" ||
     work.author === "未见署名" ||
     work.author === "匿名";
-  const author = work.author || "未见署名";
+  const author = anonymous ? "未见署名" : work.author || "未见署名";
   const status = edition.status === "archived" ? "已封存" : "当前收录";
   const excerpt = trimText(work.excerpt || "", 180);
   const authorNote = anonymous
     ? edition.status === "archived"
       ? "历史资料未载明作者，按原件封存"
-      : "身份将在结果公示后解封"
+      : "作者身份将在结果公示时按获奖范围解封"
     : "";
   const editionLink = `/#/${encodeURIComponent(edition.slug)}`;
 
@@ -250,6 +258,7 @@ const html = `<!DOCTYPE html>
     <button type="button" data-nav="archive">历届档案</button>
     <button type="button" data-nav="guide">评议说明</button>
     <button type="button" data-nav="search">全馆搜索</button>
+    <button type="button" data-nav="results" hidden>投票公示</button>
   </nav>
   <button type="button" class="site-account-link" id="site-account-link">调查员入口</button>
 </header>
@@ -257,6 +266,7 @@ const html = `<!DOCTYPE html>
   <button type="button" class="top-more" id="top-more" aria-controls="top-menu" aria-expanded="false" aria-label="更多操作">⋯</button>
   <div class="top-menu" id="top-menu">
     <button type="button" class="top-global-search" id="top-global-search">全馆搜索</button>
+    <button type="button" class="top-results" id="top-results" hidden>投票公示</button>
     <button type="button" class="top-jump" id="top-jump" hidden>↓ 投票区</button>
     <div class="account-hud" id="account-hud" hidden></div>
     <button type="button" class="theme-toggle" id="theme-toggle" aria-label="切换到黑夜模式" title="切换到黑夜模式">☾ 黑夜</button>

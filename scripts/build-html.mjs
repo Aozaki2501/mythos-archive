@@ -266,6 +266,7 @@ ${css}
     <button type="button" data-nav="archive">历届档案</button>
     <button type="button" data-nav="guide">评议说明</button>
     <button type="button" data-nav="search">全馆搜索</button>
+    <button type="button" data-nav="results" hidden>投票公示</button>
   </nav>
   <button type="button" class="site-account-link" id="site-account-link">调查员入口</button>
 </header>
@@ -273,6 +274,7 @@ ${css}
   <button type="button" class="top-more" id="top-more" aria-controls="top-menu" aria-expanded="false" aria-label="更多操作">⋯</button>
   <div class="top-menu" id="top-menu">
     <button type="button" class="top-global-search" id="top-global-search">全馆搜索</button>
+    <button type="button" class="top-results" id="top-results" hidden>投票公示</button>
     <button type="button" class="top-jump" id="top-jump" hidden>↓ 投票区</button>
     <div class="account-hud" id="account-hud" hidden></div>
     <button type="button" class="theme-toggle" id="theme-toggle" aria-label="切换到黑夜模式" title="切换到黑夜模式">☾ 黑夜</button>
