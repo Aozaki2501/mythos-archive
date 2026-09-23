@@ -18,6 +18,14 @@
   var introTimer = null;
   var eventTimer = null;
   var speechTimer = null;
+  var rollTimer = null;
+  var rollFinishTimer = null;
+  var foreheadTimer = null;
+  var foreheadAnimationTimer = null;
+  var nightShiftTimer = null;
+  var shallowSleepTimer = null;
+  var proximityFrame = null;
+  var proximityPoint = null;
   var imageTimer = null;
   var imageLoaded = false;
   var imageRequested = false;
@@ -27,6 +35,7 @@
   var pendingSpeech = false;
   var pendingSpeechReason = "context";
   var MOBILE_ENABLED = false;
+  var SHALLOW_SLEEP_DELAY = 150000;
   var observers = [];
 
   var localState = loadState(LOCAL_KEY, {
@@ -199,7 +208,7 @@
     });
     if (!available.length) available = choices;
     var item = available[Math.floor(Math.random() * available.length)] || choices[0];
-    if (!item) return { id: "empty", text: "需要找什么？" };
+    if (!item) return { id: "empty", text: "档案馆暂时没有可用台词。" };
     addRecentDialogue(item[0]);
     return { id: item[0], text: item[1] };
   }
@@ -211,12 +220,298 @@
     return node;
   }
 
+  function requestWhiteShip() {
+    window.dispatchEvent(new window.CustomEvent("mythos:white-ship"));
+  }
+
   function clear(node) {
     while (node && node.firstChild) node.removeChild(node.firstChild);
   }
 
   function setHidden(node, hidden) {
     if (node) node.hidden = !!hidden;
+  }
+
+  function setWitchState(nextState) {
+    if (!root) return;
+    root.dataset.witchState = nextState || "idle";
+  }
+
+  function setRatingProgress(progress) {
+    if (!refs.ratingProgress) return;
+    if (!progress || progress.status !== "loaded") {
+      setHidden(refs.ratingProgress, true);
+      return;
+    }
+    var total = Math.max(0, Number(progress.eligibleWorkCount) || 0);
+    if (!total) {
+      setHidden(refs.ratingProgress, true);
+      return;
+    }
+    var count = Math.max(0, Math.min(total, Number(progress.ratedCount) || 0));
+    var percent = Math.max(0, Math.min(100, Number(progress.percent) || 0));
+    var next = progress.nextAchievement || null;
+    refs.ratingProgressCount.textContent = count + "/" + total;
+    refs.ratingProgressTrack.setAttribute("aria-valuemax", String(total));
+    refs.ratingProgressTrack.setAttribute("aria-valuenow", String(count));
+    refs.ratingProgressTrack.setAttribute(
+      "aria-valuetext",
+      "已评 " + count + " / " + total + " 篇，" + percent.toFixed(1) + "%",
+    );
+    refs.ratingProgressFill.style.width = percent + "%";
+    refs.ratingProgressNote.textContent = progress.complete
+      ? "全卷评议完成 · 幻梦全录已解锁"
+      : next
+        ? "下一枚「" + next.title + "」· 还差 " + (next.threshold - count) + " 篇"
+        : "继续探索未评档案";
+    refs.ratingProgress.setAttribute(
+      "aria-label",
+      "沉入幻梦境进度 " + count + " / " + total + " 篇，" + percent.toFixed(1) + "%",
+    );
+    setHidden(refs.ratingProgress, false);
+  }
+
+  function setReadingPresence(dimmed) {
+    if (!root) return;
+    root.classList.toggle("is-reading-dim", !!dimmed && !isMobile());
+  }
+
+  function clearNightShift() {
+    if (nightShiftTimer) window.clearTimeout(nightShiftTimer);
+    nightShiftTimer = null;
+    if (root) root.classList.remove("is-night-shifting");
+  }
+
+  function flashNightShift(nextNight) {
+    clearNightShift();
+    if (
+      !nextNight ||
+      !root ||
+      isMobile() ||
+      prefersReducedMotion() ||
+      isBlocked() ||
+      localState.displayMode === "minimized" ||
+      localState.autoSpeechPaused ||
+      document.visibilityState === "hidden"
+    ) {
+      return;
+    }
+    root.classList.add("is-night-shifting");
+    nightShiftTimer = window.setTimeout(function () {
+      nightShiftTimer = null;
+      if (root) root.classList.remove("is-night-shifting");
+    }, 760);
+  }
+
+  function canEnterShallowSleep() {
+    return !!(
+      root &&
+      imageLoaded &&
+      !root.hidden &&
+      !isMobile() &&
+      !prefersReducedMotion() &&
+      !isBlocked() &&
+      localState.displayMode !== "minimized" &&
+      !localState.autoSpeechPaused &&
+      document.visibilityState !== "hidden"
+    );
+  }
+
+  function clearShallowSleep() {
+    if (shallowSleepTimer) window.clearTimeout(shallowSleepTimer);
+    shallowSleepTimer = null;
+    if (root) root.classList.remove("is-drowsy");
+  }
+
+  function scheduleShallowSleep() {
+    if (shallowSleepTimer || !canEnterShallowSleep()) return;
+    shallowSleepTimer = window.setTimeout(function () {
+      shallowSleepTimer = null;
+      if (canEnterShallowSleep()) root.classList.add("is-drowsy");
+    }, SHALLOW_SLEEP_DELAY);
+  }
+
+  function wakeFromShallowSleep() {
+    if (!root) return;
+    if (shallowSleepTimer) window.clearTimeout(shallowSleepTimer);
+    shallowSleepTimer = null;
+    root.classList.remove("is-drowsy");
+    scheduleShallowSleep();
+  }
+
+  function clearRollTimers() {
+    if (rollTimer) window.clearInterval(rollTimer);
+    if (rollFinishTimer) window.clearTimeout(rollFinishTimer);
+    rollTimer = null;
+    rollFinishTimer = null;
+  }
+
+  function clearForeheadTwinkle() {
+    if (foreheadTimer) window.clearTimeout(foreheadTimer);
+    if (foreheadAnimationTimer) window.clearTimeout(foreheadAnimationTimer);
+    foreheadTimer = null;
+    foreheadAnimationTimer = null;
+    if (refs.foreheadStars) {
+      refs.foreheadStars.querySelectorAll(".is-twinkling").forEach(function (star) {
+        star.classList.remove("is-twinkling");
+      });
+    }
+  }
+
+  function canTwinkleForehead() {
+    return !!(
+      refs.foreheadStars &&
+      imageLoaded &&
+      !isMobile() &&
+      !prefersReducedMotion() &&
+      !isBlocked() &&
+      localState.displayMode !== "minimized" &&
+      !localState.autoSpeechPaused &&
+      document.visibilityState !== "hidden"
+    );
+  }
+
+  function scheduleForeheadTwinkle() {
+    if (foreheadTimer || !canTwinkleForehead()) return;
+    var delay = 20000 + Math.floor(Math.random() * 20001);
+    foreheadTimer = window.setTimeout(function () {
+      foreheadTimer = null;
+      if (!canTwinkleForehead()) return;
+      var stars = Array.prototype.slice.call(
+        refs.foreheadStars.querySelectorAll(".witch-forehead-star"),
+      );
+      if (!stars.length) return;
+      var star = stars[Math.floor(Math.random() * stars.length)];
+      star.classList.remove("is-twinkling");
+      window.requestAnimationFrame(function () {
+        if (!canTwinkleForehead()) return;
+        star.classList.add("is-twinkling");
+        foreheadAnimationTimer = window.setTimeout(function () {
+          foreheadAnimationTimer = null;
+          star.classList.remove("is-twinkling");
+        }, 500);
+      });
+      scheduleForeheadTwinkle();
+    }, delay);
+  }
+
+  function clearWitchProximity() {
+    if (proximityFrame) window.cancelAnimationFrame(proximityFrame);
+    proximityFrame = null;
+    proximityPoint = null;
+    if (!refs.character) return;
+    refs.character.style.setProperty("--witch-proximity-x", "0px");
+    refs.character.style.setProperty("--witch-proximity-y", "0px");
+    refs.character.style.setProperty("--witch-proximity-rotate", "0deg");
+  }
+
+  function paintWitchProximity(point) {
+    proximityFrame = null;
+    if (
+      !refs.character ||
+      !root ||
+      root.hidden ||
+      modalHidden ||
+      isMobile() ||
+      prefersReducedMotion() ||
+      localState.displayMode === "minimized"
+    ) {
+      clearWitchProximity();
+      return;
+    }
+    var rect = refs.character.getBoundingClientRect();
+    var padding = 56;
+    if (
+      point.x < rect.left - padding ||
+      point.x > rect.right + padding ||
+      point.y < rect.top - padding ||
+      point.y > rect.bottom + padding
+    ) {
+      clearWitchProximity();
+      return;
+    }
+    var centerX = rect.left + rect.width / 2;
+    var centerY = rect.top + rect.height / 2;
+    var x = (point.x - centerX) / (rect.width / 2 + padding);
+    var y = (point.y - centerY) / (rect.height / 2 + padding);
+    x = Math.max(-1, Math.min(1, x));
+    y = Math.max(-1, Math.min(1, y));
+    refs.character.style.setProperty("--witch-proximity-x", (x * 4).toFixed(2) + "px");
+    refs.character.style.setProperty("--witch-proximity-y", (y * 3).toFixed(2) + "px");
+    refs.character.style.setProperty("--witch-proximity-rotate", (x * 2.4).toFixed(2) + "deg");
+  }
+
+  function handleWitchProximity(event) {
+    if (
+      event.pointerType &&
+      event.pointerType !== "mouse" &&
+      event.pointerType !== "pen"
+    ) {
+      clearWitchProximity();
+      return;
+    }
+    wakeFromShallowSleep();
+    proximityPoint = { x: event.clientX, y: event.clientY };
+    if (proximityFrame) return;
+    proximityFrame = window.requestAnimationFrame(function () {
+      if (proximityPoint) paintWitchProximity(proximityPoint);
+    });
+  }
+
+  function formatRoll(value) {
+    return String(value).padStart(2, "0");
+  }
+
+  function updateRollReadout(value) {
+    if (refs.rollReadout) {
+      refs.rollReadout.textContent = "1D100 = " + formatRoll(value);
+    }
+  }
+
+  function startWhiteShipRoll(finalRoll, reduced) {
+    if (!refs.rollReadout || reduced || isMobile()) return;
+    clearRollTimers();
+    setWitchState("rolling");
+    refs.rollReadout.classList.remove("is-final");
+    setHidden(refs.rollReadout, false);
+    updateRollReadout(Math.floor(Math.random() * 100) + 1);
+    rollTimer = window.setInterval(function () {
+      updateRollReadout(Math.floor(Math.random() * 100) + 1);
+    }, 68);
+    rollFinishTimer = window.setTimeout(function () {
+      if (rollTimer) window.clearInterval(rollTimer);
+      rollTimer = null;
+      updateRollReadout(finalRoll);
+      refs.rollReadout.classList.add("is-final");
+      rollFinishTimer = null;
+    }, 500);
+  }
+
+  function showWhiteShipDeparture() {
+    if (!refs.rollReadout || isMobile()) return;
+    clearRollTimers();
+    setWitchState("departing");
+    // 离场只保留视觉状态，判定结果继续显示，不再额外弹出离场文案。
+    setHidden(refs.rollReadout, false);
+  }
+
+  function finishWhiteShipRoll() {
+    clearRollTimers();
+    if (refs.rollReadout) {
+      refs.rollReadout.classList.remove("is-final");
+      setHidden(refs.rollReadout, true);
+    }
+    if (root && root.dataset.witchState === "rolling") setWitchState("idle");
+  }
+
+  function replayDialogueReveal() {
+    [refs.dialogue, refs.mobileDialogue].forEach(function (dialogue) {
+      if (!dialogue || prefersReducedMotion()) return;
+      dialogue.classList.remove("is-revealing");
+      window.requestAnimationFrame(function () {
+        dialogue.classList.add("is-revealing");
+      });
+    });
   }
 
   function closeDesktopBubble(returnFocus) {
@@ -226,6 +521,7 @@
     if (!refs.bubble) return;
     root.classList.remove("is-open");
     root.classList.remove("is-speaking");
+    if (root.dataset.witchState === "speaking") setWitchState("idle");
     refs.bubble.setAttribute("aria-hidden", "true");
     if (returnFocus && refs.character) refs.character.focus();
   }
@@ -237,12 +533,14 @@
     speechTimer = null;
     speechOnly = !!auto;
     if (!speechOnly) pendingSpeech = false;
+    setWitchState(speechOnly ? "speaking" : "idle");
     root.classList.add("is-open");
     root.classList.toggle("is-speaking", speechOnly);
     refs.bubble.setAttribute("aria-hidden", "false");
     if (speechOnly) clear(refs.actions);
     else renderActions(refs.actions, false);
     setQuietToggleLabel();
+    replayDialogueReveal();
     if (speechOnly) {
       speechTimer = window.setTimeout(function () {
         speechTimer = null;
@@ -318,6 +616,14 @@
     return true;
   }
 
+  function speakText(text) {
+    if (!text) return false;
+    setDialogue(text);
+    pendingSpeech = true;
+    scheduleSpeechBubble("event");
+    return true;
+  }
+
   function contextKeyFor(nextContext) {
     return [
       nextContext.pageType,
@@ -338,8 +644,7 @@
   }
 
   function currentEditionLabel() {
-    if (!context) return "本届目录";
-    return context.editionName ? "返回" + context.editionName : "本届目录";
+    return "返回目录";
   }
 
   function scrollToId(id) {
@@ -363,6 +668,28 @@
   function invokeSearch() {
     var button = document.getElementById("top-global-search");
     if (button) button.click();
+  }
+
+  function toggleCharacter() {
+    if (localState.displayMode === "minimized") {
+      localState.displayMode = "visible";
+      saveState(LOCAL_KEY, localState);
+      syncVisibility();
+    }
+    markIntroSeen();
+    var open = root.classList.contains("is-open");
+    if (open && speechOnly) {
+      if (speechTimer) window.clearTimeout(speechTimer);
+      speechTimer = null;
+      speechOnly = false;
+      root.classList.remove("is-speaking");
+      renderActions(refs.actions, false);
+      setQuietToggleLabel();
+    } else if (open) {
+      closeDesktopBubble(true);
+    } else {
+      openDesktopBubble(false);
+    }
   }
 
   function performAction(action) {
@@ -445,6 +772,7 @@
   function buildDesktop() {
     root = makeNode("div", "witch-assistant");
     root.setAttribute("data-witch", "desktop");
+    root.dataset.witchState = "idle";
     root.setAttribute("aria-label", "卡莉欧碧档案馆管理");
 
     refs.bubble = makeNode("section", "witch-bubble");
@@ -467,6 +795,14 @@
       localState.autoSpeechPaused = !localState.autoSpeechPaused;
       saveState(LOCAL_KEY, localState);
       setQuietToggleLabel();
+      if (localState.autoSpeechPaused) {
+        clearForeheadTwinkle();
+        clearShallowSleep();
+        clearNightShift();
+      } else {
+        scheduleForeheadTwinkle();
+        scheduleShallowSleep();
+      }
     });
     bubbleFoot.appendChild(refs.quietToggle);
     var collapse = createAction("收起", "close", "witch-action witch-action-muted");
@@ -485,35 +821,46 @@
     refs.bubble.appendChild(bubbleFoot);
     setQuietToggleLabel();
 
-    refs.character = makeNode("button", "witch-character");
-    refs.character.type = "button";
+    refs.ratingProgress = makeNode("a", "witch-rating-progress");
+    refs.ratingProgress.href = "#/2026";
+    refs.ratingProgress.setAttribute("aria-label", "打开 2026 届评议进度");
+    refs.ratingProgress.hidden = true;
+    var progressHead = makeNode("span", "witch-rating-progress-head");
+    progressHead.appendChild(makeNode("span", "witch-rating-progress-title", "沉入幻梦境"));
+    refs.ratingProgressCount = makeNode("strong", "witch-rating-progress-count", "0 / 53");
+    progressHead.appendChild(refs.ratingProgressCount);
+    refs.ratingProgress.appendChild(progressHead);
+    refs.ratingProgressTrack = makeNode("span", "witch-rating-progress-track");
+    refs.ratingProgressTrack.setAttribute("role", "progressbar");
+    refs.ratingProgressTrack.setAttribute("aria-label", "沉入幻梦境评议进度");
+    refs.ratingProgressTrack.setAttribute("aria-valuemin", "0");
+    refs.ratingProgressTrack.setAttribute("aria-valuemax", "53");
+    refs.ratingProgressFill = makeNode("span", "witch-rating-progress-fill");
+    refs.ratingProgressTrack.appendChild(refs.ratingProgressFill);
+    refs.ratingProgress.appendChild(refs.ratingProgressTrack);
+    refs.ratingProgressNote = makeNode("span", "witch-rating-progress-note", "再评 5 篇，解锁初次下潜");
+    refs.ratingProgress.appendChild(refs.ratingProgressNote);
+
+    var siteBar = document.getElementById("site-bar");
+    var siteAccountLink = document.getElementById("site-account-link");
+    if (siteBar) siteBar.insertBefore(refs.ratingProgress, siteAccountLink || null);
+    else root.appendChild(refs.ratingProgress);
+
+    refs.character = makeNode("div", "witch-character");
+    refs.character.setAttribute("role", "button");
+    refs.character.setAttribute("tabindex", "0");
     refs.character.setAttribute("aria-label", "打开卡莉欧碧导览");
     refs.character.setAttribute("aria-controls", "witch-bubble");
     refs.character.appendChild(makeNode("span", "witch-fallback", "✦"));
-    refs.character.appendChild(makeNode("span", "witch-hover-tip", "需要找什么？"));
     refs.character.addEventListener("click", function () {
-      if (localState.displayMode === "minimized") {
-        localState.displayMode = "visible";
-        saveState(LOCAL_KEY, localState);
-        syncVisibility();
-      }
-      markIntroSeen();
-      var open = root.classList.contains("is-open");
-      if (open && speechOnly) {
-        if (speechTimer) window.clearTimeout(speechTimer);
-        speechTimer = null;
-        speechOnly = false;
-        root.classList.remove("is-speaking");
-        renderActions(refs.actions, false);
-        setQuietToggleLabel();
-      } else if (open) {
-        closeDesktopBubble(true);
-      } else {
-        openDesktopBubble(false);
-      }
+      toggleCharacter();
     });
     refs.character.addEventListener("keydown", function (event) {
       if (event.key === "Escape") closeDesktopBubble(true);
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggleCharacter();
+      }
     });
 
     refs.introTip = makeNode("span", "witch-intro-tip", "第一次来？");
@@ -524,10 +871,15 @@
     refs.eventTip.setAttribute("role", "status");
     refs.eventTip.setAttribute("aria-live", "polite");
     refs.eventTip.hidden = true;
+    refs.rollReadout = makeNode("span", "witch-roll-readout");
+    refs.rollReadout.setAttribute("role", "status");
+    refs.rollReadout.setAttribute("aria-live", "polite");
+    refs.rollReadout.hidden = true;
     var figure = makeNode("div", "witch-figure");
     figure.appendChild(refs.character);
     figure.appendChild(refs.introTip);
     figure.appendChild(refs.eventTip);
+    figure.appendChild(refs.rollReadout);
 
     refs.restore = makeNode("button", "witch-restore", "✦");
     refs.restore.type = "button";
@@ -546,8 +898,17 @@
   }
 
   function buildMobile() {
-    if (!MOBILE_ENABLED) return;
     var topMenu = document.getElementById("top-menu");
+    if (topMenu) {
+      refs.mobileShipEntry = makeNode("button", "witch-menu-entry", "搭乘白船");
+      refs.mobileShipEntry.type = "button";
+      refs.mobileShipEntry.setAttribute("aria-label", "搭乘白船，随机打开一篇作品");
+      refs.mobileShipEntry.addEventListener("click", function () {
+        requestWhiteShip();
+      });
+      topMenu.appendChild(refs.mobileShipEntry);
+    }
+    if (!MOBILE_ENABLED) return;
     if (topMenu) {
       refs.mobileEntry = makeNode("button", "witch-menu-entry", "档案馆管理");
       refs.mobileEntry.type = "button";
@@ -611,6 +972,8 @@
     image.onload = function () {
       imageLoaded = true;
       refs.character.classList.add("has-image");
+      scheduleForeheadTwinkle();
+      scheduleShallowSleep();
     };
     image.onerror = function () {
       refs.character.classList.add("image-failed");
@@ -621,9 +984,31 @@
     cube.alt = "";
     cube.decoding = "async";
     cube.src = CUBE_ASSET;
+    var cubeAction = makeNode("button", "witch-cube-action");
+    cubeAction.type = "button";
+    cubeAction.setAttribute("aria-label", "搭乘白船，随机打开一篇作品");
+    cubeAction.title = "搭乘白船";
+    cubeAction.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      requestWhiteShip();
+    });
+    cubeAction.appendChild(cube);
+    var stars = makeNode("span", "witch-departure-stars");
+    for (var i = 0; i < 4; i += 1) {
+      stars.appendChild(makeNode("span", "witch-departure-star"));
+    }
+    var foreheadStars = makeNode("span", "witch-forehead-stars");
+    for (var j = 0; j < 4; j += 1) {
+      foreheadStars.appendChild(makeNode("span", "witch-forehead-star"));
+    }
     portrait.appendChild(glow);
     portrait.appendChild(image);
-    portrait.appendChild(cube);
+    portrait.appendChild(foreheadStars);
+    portrait.appendChild(cubeAction);
+    portrait.appendChild(stars);
+    refs.cubeAction = cubeAction;
+    refs.foreheadStars = foreheadStars;
     refs.character.insertBefore(portrait, refs.character.firstChild);
   }
 
@@ -700,8 +1085,20 @@
       setHidden(refs.restore, localState.displayMode !== "minimized");
       if (blocked || mobile) closeDesktopBubble(false);
     }
+    if (blocked || mobile || localState.displayMode === "minimized") {
+      clearForeheadTwinkle();
+      clearWitchProximity();
+      clearShallowSleep();
+      clearNightShift();
+    } else {
+      scheduleForeheadTwinkle();
+      scheduleShallowSleep();
+    }
     if (refs.mobileEntry) {
       refs.mobileEntry.hidden = !mobile || blocked;
+    }
+    if (refs.mobileShipEntry) {
+      refs.mobileShipEntry.hidden = !mobile || blocked;
     }
     if (blocked || !mobile) closeMobilePanel(false);
     if (!mobile && !blocked) {
@@ -726,6 +1123,7 @@
       var nextNight = document.documentElement.dataset.theme === "dark";
       if (wasNight === nextNight) return;
       context.isNightMode = nextNight;
+      flashNightShift(nextNight);
       /* 主题切换本身只说一次；随后即使跳转页面，也应由页面导览词接管。 */
       contextKey = contextKeyFor(context);
       speakDialogue(nextNight ? "night" : "day", "context");
@@ -746,16 +1144,31 @@
       if (!isMobile()) scheduleImage();
     });
     document.addEventListener("keydown", function (event) {
+      wakeFromShallowSleep();
       if (event.key !== "Escape") return;
       if (panelOpen) closeMobilePanel(true);
       else if (root && root.classList.contains("is-open")) closeDesktopBubble(true);
     });
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "hidden") {
+        clearForeheadTwinkle();
+        clearShallowSleep();
+        clearNightShift();
+      } else {
+        syncVisibility();
+      }
+    });
+    document.addEventListener("pointerdown", wakeFromShallowSleep, { passive: true });
+    window.addEventListener("scroll", wakeFromShallowSleep, { passive: true });
+    window.addEventListener("pointermove", handleWitchProximity, { passive: true });
+    window.addEventListener("blur", clearWitchProximity);
     syncVisibility();
   }
 
   function update(nextContext) {
     if (!mounted) mount();
     if (!nextContext) return;
+    wakeFromShallowSleep();
     context = Object.assign({}, nextContext);
     updateDialogue(context);
     renderActions(refs.actions, false);
@@ -798,6 +1211,13 @@
     update: update,
     recordArticleOpen: recordArticleOpen,
     notify: notify,
+    speakText: speakText,
+    setState: setWitchState,
+    setReadingPresence: setReadingPresence,
+    setRatingProgress: setRatingProgress,
+    startWhiteShipRoll: startWhiteShipRoll,
+    showWhiteShipDeparture: showWhiteShipDeparture,
+    finishWhiteShipRoll: finishWhiteShipRoll,
     hideForModal: hideForModal,
     restoreAfterModal: restoreAfterModal,
   };

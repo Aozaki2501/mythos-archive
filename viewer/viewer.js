@@ -17,7 +17,28 @@
   var READING_KEY = "mythos.reading.v1";
   var READING_LIMIT = 12;
   var DEFAULT_ADMIN_QQ = "10001";
+  var RATING_PROGRESS_EDITION = "2026";
+  var RATING_PROGRESS_MILESTONE = 5;
+  var RATING_ACHIEVEMENT_MILESTONES = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 53];
+  var RATING_ACHIEVEMENT_TITLES = {
+    5: "初次下潜",
+    10: "梦境回响",
+    15: "迷雾渐深",
+    20: "异梦拾遗",
+    25: "夜航者",
+    30: "深层勘探",
+    35: "梦域行者",
+    40: "长夜巡礼",
+    45: "近梦尽头",
+    50: "梦境守秘",
+    53: "幻梦全录",
+  };
   var BRAND_ASSET_URL = "./archive-brand.webp?v=20260921-brand";
+  var WHITE_SHIP_EDITION_SLUG = "2026";
+  var WHITE_SHIP_DEPARTURE_START_MS = 560;
+  var WHITE_SHIP_ROUTE_DELAY_MS = 780;
+  var WHITE_SHIP_MESSAGE_MS = 5600;
+  var whiteShipBusy = false;
 
   var PHASES = [
     { key: "征文", label: "创作征文" },
@@ -248,6 +269,7 @@
       session: null,
       settings: defaultSettings(),
       ratings: {},
+      ratingAchievements: {},
       comments: {},
       stars: {},
       likes: {},
@@ -259,6 +281,7 @@
     var base = emptyStore();
     if (!raw) return base;
     base.ratings = raw.ratings || {};
+    base.ratingAchievements = raw.ratingAchievements || {};
     base.comments = raw.comments || {};
     base.stars = raw.stars || {};
     base.likes = raw.likes || {};
@@ -820,6 +843,10 @@
   var cloudStarsLoaded = {};
   var cloudBundleInflight = {};
   var cloudStarsInflight = {};
+  var cloudRatingProgress = {};
+  var cloudRatingProgressInflight = {};
+  var cloudRatingProgressRefreshInflight = {};
+  var cloudRatingAchievementClaimInflight = {};
   var cloudInsightsLoaded = {};
   var cloudInsightsInflight = {};
   var cloudInsights = {};
@@ -1167,6 +1194,10 @@
     cloudStarsLoaded = {};
     cloudBundleInflight = {};
     cloudStarsInflight = {};
+    cloudRatingProgress = {};
+    cloudRatingProgressInflight = {};
+    cloudRatingProgressRefreshInflight = {};
+    cloudRatingAchievementClaimInflight = {};
     cloudInsightsLoaded = {};
     cloudInsightsInflight = {};
     cloudInsights = {};
@@ -1355,6 +1386,582 @@
     return null;
   }
 
+  function localRatedWorkIds(edition) {
+    if (!edition || !canInteract()) return [];
+    return edition.works.filter(function (work) {
+      return !!myRatingOf(workId(edition.slug, work.slug));
+    }).map(function (work) {
+      return workId(edition.slug, work.slug);
+    });
+  }
+
+  function ratingAchievementDefinitions(total) {
+    var count = Math.max(0, Number(total) || 0);
+    var thresholds = RATING_ACHIEVEMENT_MILESTONES.filter(function (threshold) {
+      return threshold < count;
+    });
+    if (count > 0) thresholds.push(count);
+    return thresholds.filter(function (threshold, index) {
+      return thresholds.indexOf(threshold) === index;
+    }).map(function (threshold) {
+      var isFirst = threshold === 5;
+      var isComplete = threshold === count;
+      var title = RATING_ACHIEVEMENT_TITLES[threshold] ||
+        (isComplete ? "幻梦全录" : "第" + Math.ceil(threshold / 5) + "层回声");
+      var description = isFirst
+        ? "你已为本届 5 份档案留下评议。幻梦境的门，已经向你敞开。"
+        : isComplete
+          ? "你已为本届全部 " + count + " 份档案留下评议。此番下潜，幻梦境已被你完整记录。"
+          : "你已为本届 " + threshold + " 份档案留下评议。梦境的回声，又向深处延伸一步。";
+      return {
+        key: isFirst ? "first-five" : isComplete ? "full-volume" : "rated-" + threshold,
+        threshold: threshold,
+        title: title,
+        description: description,
+      };
+    });
+  }
+
+  function localRatingAchievementStates(edition, ratedCount) {
+    if (!edition || !canInteract()) return [];
+    var user = currentUser();
+    var legacyId = edition.slug + "::" + user.qq;
+    var definitions = ratingAchievementDefinitions(edition.works.length);
+    var missingReached = definitions.filter(function (definition) {
+      var key = legacyId + "::" + definition.key;
+      var hasLegacyFirst = definition.key === "first-five" && store.ratingAchievements[legacyId];
+      return definition.threshold <= ratedCount && !store.ratingAchievements[key] && !hasLegacyFirst;
+    });
+    var newestMissingKey = missingReached.length
+      ? missingReached[missingReached.length - 1].key
+      : "";
+    if (missingReached.length) {
+      var now = new Date().toISOString();
+      missingReached.forEach(function (definition) {
+        store.ratingAchievements[legacyId + "::" + definition.key] = {
+          unlockedAt: now,
+          notifiedAt: definition.key === newestMissingKey ? null : now,
+        };
+      });
+      persist();
+    }
+
+    return definitions.map(function (definition) {
+      var record = store.ratingAchievements[legacyId + "::" + definition.key];
+      if (!record && definition.key === "first-five") record = store.ratingAchievements[legacyId];
+      return Object.assign({}, definition, {
+        unlocked: !!record,
+        noticePending: !!(record && !record.notifiedAt),
+        unlockedAt: record ? record.unlockedAt : null,
+      });
+    });
+  }
+
+  function localRatingProgress(edition) {
+    var ratedWorkIds = localRatedWorkIds(edition);
+    var achievements = localRatingAchievementStates(edition, ratedWorkIds.length);
+    var pendingAchievements = achievements.filter(function (item) { return item.noticePending; });
+    return {
+      status: "loaded",
+      editionSlug: edition.slug,
+      ratedWorkIds: ratedWorkIds,
+      ratedCount: ratedWorkIds.length,
+      eligibleWorkCount: edition.works.length,
+      milestone: RATING_PROGRESS_MILESTONE,
+      achievements: achievements,
+      pendingAchievements: pendingAchievements,
+      nextAchievement: achievements.find(function (item) { return !item.unlocked; }) || null,
+      achievementUnlocked: achievements.some(function (item) { return item.unlocked; }),
+      achievementNoticePending: pendingAchievements.length > 0,
+    };
+  }
+
+  function ratingProgressAvailable(edition) {
+    if (!edition || edition.slug !== RATING_PROGRESS_EDITION) return false;
+    if (!canInteract()) return false;
+    return isArchivedEdition(edition) || phaseOf(edition.slug) !== "征文";
+  }
+
+  function loadCloudRatingProgress(editionSlug, force) {
+    if (!USE_CLOUD || !canInteract()) return Promise.resolve(null);
+    if (!force && cloudRatingProgress[editionSlug] && cloudRatingProgress[editionSlug].status === "loaded") {
+      return Promise.resolve(cloudRatingProgress[editionSlug]);
+    }
+    if (cloudRatingProgressRefreshInflight[editionSlug]) {
+      return cloudRatingProgressRefreshInflight[editionSlug];
+    }
+    if (cloudRatingProgressInflight[editionSlug]) {
+      if (!force) return cloudRatingProgressInflight[editionSlug];
+      var currentRequest = cloudRatingProgressInflight[editionSlug];
+      var refreshRequest = currentRequest.then(
+        function () { return requestCloudRatingProgress(editionSlug); },
+        function () { return requestCloudRatingProgress(editionSlug); },
+      );
+      cloudRatingProgressRefreshInflight[editionSlug] = refreshRequest.then(
+        function (data) {
+          delete cloudRatingProgressRefreshInflight[editionSlug];
+          return data;
+        },
+        function (error) {
+          delete cloudRatingProgressRefreshInflight[editionSlug];
+          throw error;
+        },
+      );
+      return cloudRatingProgressRefreshInflight[editionSlug];
+    }
+    return requestCloudRatingProgress(editionSlug);
+  }
+
+  function requestCloudRatingProgress(editionSlug) {
+    cloudRatingProgress[editionSlug] = { status: "loading", editionSlug: editionSlug };
+    cloudRatingProgressInflight[editionSlug] = window.MythosCloud.call(
+      "getMyRatingProgress",
+      { editionSlug: editionSlug },
+    ).then(function (data) {
+      var achievements = Array.isArray(data && data.achievements)
+        ? data.achievements
+        : [];
+      if (!achievements.length && data && data.achievementUnlocked) {
+        var legacyAchievement = ratingAchievementDefinitions(Number(data.eligibleWorkCount) || 53)[0];
+        achievements = [Object.assign({}, legacyAchievement, {
+          unlocked: true,
+          noticePending: !!data.achievementNoticePending,
+        })];
+      }
+      var pendingAchievements = Array.isArray(data && data.pendingAchievements)
+        ? data.pendingAchievements
+        : achievements.filter(function (item) { return item.noticePending; });
+      cloudRatingProgress[editionSlug] = {
+        status: "loaded",
+        editionSlug: editionSlug,
+        ratedWorkIds: Array.isArray(data && data.ratedWorkIds) ? data.ratedWorkIds : [],
+        ratedCount: Number(data && data.ratedCount) || 0,
+        eligibleWorkCount: Number(data && data.eligibleWorkCount) || 0,
+        milestone: Number(data && data.milestone) || RATING_PROGRESS_MILESTONE,
+        achievements: achievements,
+        pendingAchievements: pendingAchievements,
+        nextAchievement: data && data.nextAchievement || achievements.find(function (item) { return !item.unlocked; }) || null,
+        achievementUnlocked: achievements.some(function (item) { return item.unlocked; }) || !!(data && data.achievementUnlocked),
+        achievementNoticePending: pendingAchievements.length > 0 || !!(data && data.achievementNoticePending),
+      };
+      updateWitchRatingProgress(findEdition(editionSlug), cloudRatingProgress[editionSlug]);
+      refreshRatingProgressViews(editionSlug);
+      if (cloudRatingProgress[editionSlug].achievementNoticePending) {
+        window.setTimeout(function () {
+          claimPendingRatingAchievement(editionSlug);
+        }, 0);
+      }
+      return cloudRatingProgress[editionSlug];
+    }).catch(function (error) {
+      cloudRatingProgress[editionSlug] = {
+        status: "error",
+        editionSlug: editionSlug,
+        message: error && error.message ? error.message : String(error),
+      };
+      refreshRatingProgressViews(editionSlug);
+      throw error;
+    }).then(function (data) {
+      delete cloudRatingProgressInflight[editionSlug];
+      return data;
+    }, function (error) {
+      delete cloudRatingProgressInflight[editionSlug];
+      throw error;
+    });
+    return cloudRatingProgressInflight[editionSlug];
+  }
+
+  function claimPendingRatingAchievement(editionSlug) {
+    var progress = cloudRatingProgress[editionSlug];
+    var edition = findEdition(editionSlug);
+    if (!USE_CLOUD) {
+      if (!edition || !ratingProgressAvailable(edition)) return Promise.resolve(false);
+      progress = localRatingProgress(edition);
+      var localPending = progress.pendingAchievements && progress.pendingAchievements[0];
+      if (!localPending) return Promise.resolve(false);
+      if (cloudRatingAchievementClaimInflight[editionSlug]) {
+        return cloudRatingAchievementClaimInflight[editionSlug];
+      }
+      var localUserId = editionSlug + "::" + currentUser().qq;
+      var localAchievementId = localUserId + "::" + localPending.key;
+      var localRecord = store.ratingAchievements[localAchievementId];
+      if (!localRecord && localPending.key === "first-five") {
+        localRecord = store.ratingAchievements[localUserId];
+      }
+      if (!localRecord || localRecord.notifiedAt) return Promise.resolve(false);
+      localRecord.notifiedAt = new Date().toISOString();
+      persist();
+      var localClaim = Promise.resolve(true).then(function () {
+        refreshRatingProgressViews(editionSlug);
+        updateWitchRatingProgress(edition, localRatingProgress(edition));
+        showRatingAchievementNotice(editionSlug, localPending);
+        return true;
+      }).then(function (claimed) {
+        delete cloudRatingAchievementClaimInflight[editionSlug];
+        return claimed;
+      });
+      cloudRatingAchievementClaimInflight[editionSlug] = localClaim;
+      return localClaim;
+    }
+    var pending = progress && Array.isArray(progress.pendingAchievements)
+      ? progress.pendingAchievements[0]
+      : null;
+    if (!pending && progress && progress.achievementNoticePending) {
+      pending = (progress.achievements || []).find(function (item) { return item.noticePending; }) || null;
+    }
+    if (!progress || !pending) return Promise.resolve(false);
+    if (cloudRatingAchievementClaimInflight[editionSlug]) {
+      return cloudRatingAchievementClaimInflight[editionSlug];
+    }
+    cloudRatingAchievementClaimInflight[editionSlug] = window.MythosCloud.call(
+      "claimRatingAchievement",
+      { editionSlug: editionSlug, achievementKey: pending.key },
+    ).then(function (result) {
+      var current = cloudRatingProgress[editionSlug];
+      if (current) {
+        current.achievements = (current.achievements || []).map(function (item) {
+          return item.key === pending.key
+            ? Object.assign({}, item, { noticePending: false })
+            : item;
+        });
+        current.pendingAchievements = current.achievements.filter(function (item) { return item.noticePending; });
+        current.achievementNoticePending = current.pendingAchievements.length > 0;
+        updateWitchRatingProgress(edition, current);
+      }
+      refreshRatingProgressViews(editionSlug);
+      if (result && result.claimed) {
+        var hasMorePending = !!(current && current.pendingAchievements.length);
+        showRatingAchievementNotice(
+          editionSlug,
+          result.achievement || pending,
+          hasMorePending ? function () { claimPendingRatingAchievement(editionSlug); } : null,
+        );
+      }
+      return !!(result && result.claimed);
+    }).catch(function (error) {
+      console.error(error);
+      return false;
+    }).then(function (claimed) {
+      delete cloudRatingAchievementClaimInflight[editionSlug];
+      return claimed;
+    });
+    return cloudRatingAchievementClaimInflight[editionSlug];
+  }
+
+  function ratingProgressData(edition) {
+    if (!ratingProgressAvailable(edition)) return null;
+    if (!USE_CLOUD) {
+      var localProgress = localRatingProgress(edition);
+      updateWitchRatingProgress(edition, localProgress);
+      if (localProgress.achievementNoticePending) {
+        window.setTimeout(function () { claimPendingRatingAchievement(edition.slug); }, 0);
+      }
+      return localProgress;
+    }
+    var progress = cloudRatingProgress[edition.slug];
+    if (!progress) {
+      progress = cloudRatingProgress[edition.slug] = {
+        status: "loading",
+        editionSlug: edition.slug,
+      };
+      loadCloudRatingProgress(edition.slug, false).catch(function () {});
+    } else if (progress.status === "loaded" && progress.achievementNoticePending) {
+      window.setTimeout(function () {
+        claimPendingRatingAchievement(edition.slug);
+      }, 0);
+    }
+    updateWitchRatingProgress(edition, progress);
+    return progress;
+  }
+
+  function ratingPercent(progress, total) {
+    var denominator = total || (progress && progress.eligibleWorkCount);
+    if (!progress || !denominator) return 0;
+    return Math.max(0, Math.min(100, progress.ratedCount / denominator * 100));
+  }
+
+  function firstUnratedWork(edition, progress, skipWorkId) {
+    if (!edition || !progress || !Array.isArray(progress.ratedWorkIds)) return null;
+    var rated = {};
+    progress.ratedWorkIds.forEach(function (id) { rated[id] = true; });
+    for (var i = 0; i < edition.works.length; i++) {
+      var work = edition.works[i];
+      var id = workId(edition.slug, work.slug);
+      if (!rated[id] && id !== skipWorkId) return work;
+    }
+    return null;
+  }
+
+  function showRatingAchievementModal(editionSlug, selectedAchievement) {
+    var edition = findEdition(editionSlug);
+    var progress = edition
+      ? (USE_CLOUD ? cloudRatingProgress[editionSlug] : localRatingProgress(edition))
+      : null;
+    var achievements = progress && Array.isArray(progress.achievements)
+      ? progress.achievements.filter(function (item) { return item.unlocked; })
+      : [];
+    var body = el("div", "modal-body rating-achievement-detail");
+    body.appendChild(el("div", "rating-achievement-mark", "✦"));
+    body.appendChild(el("h3", "rating-achievement-title", "已解锁 " + achievements.length + " 项成就"));
+    if (achievements.length) {
+      var list = el("div", "rating-achievement-list");
+      achievements.forEach(function (achievement) {
+        var item = el("article", "rating-achievement-item");
+        var heading = el("div", "rating-achievement-item-head");
+        heading.appendChild(el("strong", null, achievement.title));
+        heading.appendChild(el("span", null, achievement.threshold + "/" + (progress.eligibleWorkCount || 53)));
+        item.appendChild(heading);
+        item.appendChild(el("p", null, achievement.description));
+        list.appendChild(item);
+      });
+      body.appendChild(list);
+    } else if (selectedAchievement) {
+      body.appendChild(el("p", "modal-meta", selectedAchievement.description));
+    }
+    openModal("成就记录", body);
+  }
+
+  var ratingAchievementTimer = null;
+  var ratingAchievementNoticeQueue = [];
+  var ratingAchievementActiveNotice = null;
+  var ratingAchievementActiveOnDismiss = null;
+
+  function removeRatingAchievementNotice(notice) {
+    if (notice && notice.parentNode) notice.parentNode.removeChild(notice);
+    if (ratingAchievementActiveNotice !== notice) return;
+    if (ratingAchievementTimer) window.clearTimeout(ratingAchievementTimer);
+    ratingAchievementTimer = null;
+    ratingAchievementActiveNotice = null;
+    var onDismiss = ratingAchievementActiveOnDismiss;
+    ratingAchievementActiveOnDismiss = null;
+    if (ratingAchievementNoticeQueue.length) {
+      window.setTimeout(showNextRatingAchievementNotice, 180);
+    }
+    if (onDismiss) onDismiss();
+  }
+
+  function showRatingAchievementNotice(editionSlug, achievement, onDismiss) {
+    ratingAchievementNoticeQueue.push({
+      editionSlug: editionSlug,
+      achievement: achievement,
+      onDismiss: onDismiss || null,
+    });
+    showNextRatingAchievementNotice();
+  }
+
+  function showNextRatingAchievementNotice() {
+    if (ratingAchievementActiveNotice || !ratingAchievementNoticeQueue.length) return;
+    var notification = ratingAchievementNoticeQueue.shift();
+    var editionSlug = notification.editionSlug;
+    var edition = findEdition(editionSlug);
+    var total = edition ? edition.works.length : 53;
+    var details = notification.achievement || ratingAchievementDefinitions(total)[0];
+    var slot = refs.content.querySelector('.rating-progress-slot[data-edition="' + editionSlug + '"]');
+    if (isMobileLayout() && slot) {
+      var inlineNotice = el("div", "rating-achievement-notice");
+      inlineNotice.setAttribute("role", "status");
+      inlineNotice.setAttribute("aria-live", "polite");
+      var inlineCopy = el("div", "rating-achievement-copy");
+      inlineCopy.appendChild(el("strong", null, "✦ 成就解锁：" + details.title));
+      inlineCopy.appendChild(el("span", null, details.description));
+      inlineNotice.appendChild(inlineCopy);
+      var inlineClose = el("button", "rating-achievement-close", "收起");
+      inlineClose.type = "button";
+      inlineClose.setAttribute("aria-label", "收起成就提示");
+      inlineClose.addEventListener("click", function () { removeRatingAchievementNotice(inlineNotice); });
+      inlineNotice.appendChild(inlineClose);
+      slot.appendChild(inlineNotice);
+      ratingAchievementActiveNotice = inlineNotice;
+      ratingAchievementActiveOnDismiss = notification.onDismiss;
+      ratingAchievementTimer = window.setTimeout(function () { removeRatingAchievementNotice(inlineNotice); }, 4800);
+      return;
+    }
+
+    var notice = el("section", "rating-achievement-toast");
+    notice.id = "rating-achievement-toast";
+    notice.setAttribute("role", "status");
+    notice.setAttribute("aria-live", "polite");
+    notice.appendChild(el("span", "rating-achievement-toast-mark", "✦"));
+    var copy = el("div", "rating-achievement-toast-copy");
+    copy.appendChild(el("span", "rating-achievement-toast-kicker", "卡莉欧碧 · 成就解锁"));
+    copy.appendChild(el("strong", "rating-achievement-toast-title", details.title));
+    copy.appendChild(el("span", "rating-achievement-toast-meta", "已评 " + details.threshold + " / " + total + " 篇"));
+    copy.appendChild(el("p", "rating-achievement-toast-description", details.description));
+    notice.appendChild(copy);
+    var close = el("button", "rating-achievement-close", "×");
+    close.type = "button";
+    close.setAttribute("aria-label", "收起成就提示");
+    close.addEventListener("click", function () { removeRatingAchievementNotice(notice); });
+    notice.appendChild(close);
+    document.body.appendChild(notice);
+    ratingAchievementActiveNotice = notice;
+    ratingAchievementActiveOnDismiss = notification.onDismiss;
+    ratingAchievementTimer = window.setTimeout(function () { removeRatingAchievementNotice(notice); }, 5200);
+  }
+
+  function renderRatingProgress(edition, compact, currentWorkId) {
+    if (!ratingProgressAvailable(edition)) return null;
+    var progress = ratingProgressData(edition);
+    var slot = el("section", "rating-progress-slot" + (compact ? " is-compact" : ""));
+    slot.dataset.edition = edition.slug;
+    slot.dataset.workId = currentWorkId || "";
+    if (!progress || progress.status === "loading") {
+      slot.appendChild(el("p", "rating-progress-loading", "正在读取评议进度…"));
+      return slot;
+    }
+    if (progress.status === "error") {
+      var retry = el("button", "btn-ghost btn-tiny rating-progress-retry", "进度暂时无法读取 · 重试");
+      retry.type = "button";
+      retry.addEventListener("click", function () {
+        loadCloudRatingProgress(edition.slug, true).catch(function () {});
+      });
+      slot.appendChild(retry);
+      return slot;
+    }
+
+    var total = progress.eligibleWorkCount || edition.works.length;
+    var count = Math.min(progress.ratedCount, total);
+    var percent = ratingPercent(progress, total);
+    var percentText = percent.toFixed(1);
+    var achievements = Array.isArray(progress.achievements) && progress.achievements.length
+      ? progress.achievements
+      : ratingAchievementDefinitions(total).map(function (item) {
+        return Object.assign({}, item, { unlocked: false, noticePending: false });
+      });
+    var unlockedAchievements = achievements.filter(function (item) { return item.unlocked; });
+    var latestUnlocked = unlockedAchievements.length
+      ? unlockedAchievements[unlockedAchievements.length - 1]
+      : null;
+    var nextAchievement = achievements.find(function (item) { return !item.unlocked; }) || null;
+    if (compact) {
+      var summary = el("div", "rating-progress-compact-line");
+      summary.appendChild(el("span", null, "沉入幻梦境"));
+      summary.appendChild(el("strong", null, count + "/" + total + " 篇 · " + percentText + "%"));
+      slot.appendChild(summary);
+      if (latestUnlocked) {
+        var earned = el("button", "rating-progress-achievement-link", "✦ " + latestUnlocked.title + " · 已解锁");
+        earned.type = "button";
+        earned.addEventListener("click", function () { showRatingAchievementModal(edition.slug, latestUnlocked); });
+        slot.appendChild(earned);
+      }
+      if (nextAchievement) {
+        slot.appendChild(el("p", "rating-progress-hint", "再评 " + (nextAchievement.threshold - count) + " 篇解锁「" + nextAchievement.title + "」"));
+      } else {
+        slot.appendChild(el("p", "rating-progress-hint", "本届评议完成 · 幻梦全录已解锁"));
+      }
+      var nextWork = votingOpen(edition.slug) && myRatingOf(currentWorkId)
+        ? firstUnratedWork(edition, progress, currentWorkId)
+        : null;
+      if (nextWork) {
+        var nextLink = el("a", "rating-progress-next", "再读一份未评档案 →");
+        nextLink.href = "#/" + edition.slug + "/" + encodeURIComponent(nextWork.slug);
+        slot.appendChild(nextLink);
+      }
+      return slot;
+    }
+
+    var head = el("div", "rating-progress-head");
+    var title = el("div", "rating-progress-title");
+    title.appendChild(el("span", "rating-progress-kicker", "沉入幻梦境"));
+    title.appendChild(el("strong", null, "已评 " + count + " / " + total + " 篇"));
+    head.appendChild(title);
+    head.appendChild(el("strong", "rating-progress-percent", percentText + "%"));
+    slot.appendChild(head);
+
+    var track = el("div", "rating-progress-track");
+    track.setAttribute("role", "progressbar");
+    track.setAttribute("aria-label", "沉入幻梦境评分进度");
+    track.setAttribute("aria-valuemin", "0");
+    track.setAttribute("aria-valuemax", String(total));
+    track.setAttribute("aria-valuenow", String(count));
+    track.setAttribute("aria-valuetext", "已评 " + count + " / " + total + " 篇，" + percentText + "%");
+    var fill = el("span", "rating-progress-fill");
+    fill.style.width = percent + "%";
+    track.appendChild(fill);
+    achievements.forEach(function (achievement) {
+      var isFinalMilestone = achievement.threshold === total;
+      var marker = el(
+        "span",
+        "rating-progress-milestone" +
+          (achievement.unlocked ? " is-unlocked" : "") +
+          (isFinalMilestone ? " is-final" : ""),
+        isFinalMilestone ? null : "✦",
+      );
+      if (isFinalMilestone) {
+        var crown = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        crown.setAttribute("class", "rating-progress-crown");
+        crown.setAttribute("viewBox", "0 0 24 24");
+        crown.setAttribute("aria-hidden", "true");
+        var crownShape = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        crownShape.setAttribute("d", "M2 6l5.3 4.2L12 3l4.7 7.2L22 6l-1.6 12H3.6L2 6zm2.4 14h15.2v2H4.4v-2z");
+        crown.appendChild(crownShape);
+        marker.appendChild(crown);
+      }
+      marker.style.left = (achievement.threshold / total * 100) + "%";
+      marker.title = "评满 " + achievement.threshold + " 篇解锁「" + achievement.title + "」";
+      marker.setAttribute("aria-hidden", "true");
+      track.appendChild(marker);
+    });
+    slot.appendChild(track);
+
+    var foot = el("div", "rating-progress-foot");
+    if (latestUnlocked) {
+      var badge = el("button", "rating-progress-achievement-link", "✦ 已解锁 " + unlockedAchievements.length + " 项 · " + latestUnlocked.title);
+      badge.type = "button";
+      badge.addEventListener("click", function () { showRatingAchievementModal(edition.slug, latestUnlocked); });
+      foot.appendChild(badge);
+    }
+    if (count >= total) {
+      foot.appendChild(el("span", null, "本届评议完成 · 幻梦全录已解锁"));
+    } else if (nextAchievement) {
+      foot.appendChild(el("span", null, "再评 " + (nextAchievement.threshold - count) + " 篇解锁「" + nextAchievement.title + "」"));
+    }
+    var next = votingOpen(edition.slug) ? firstUnratedWork(edition, progress) : null;
+    if (next) {
+      var continueLink = el("a", "rating-progress-next", "继续下潜 →");
+      continueLink.href = "#/" + edition.slug + "/" + encodeURIComponent(next.slug);
+      foot.appendChild(continueLink);
+    }
+    slot.appendChild(foot);
+    if (progress.achievementNoticePending) {
+      window.setTimeout(function () { claimPendingRatingAchievement(edition.slug); }, 0);
+    }
+    return slot;
+  }
+
+  function refreshRatingProgressViews(editionSlug) {
+    if (refs.content) {
+      Array.prototype.slice.call(refs.content.querySelectorAll(".rating-progress-slot")).forEach(function (oldSlot) {
+        if (oldSlot.dataset.edition !== editionSlug) return;
+        var edition = findEdition(editionSlug);
+        var replacement = renderRatingProgress(edition, oldSlot.classList.contains("is-compact"), oldSlot.dataset.workId || "");
+        if (!replacement || !oldSlot.parentNode) return;
+        var oldTrack = oldSlot.querySelector(".rating-progress-track");
+        var nextTrack = replacement.querySelector(".rating-progress-track");
+        var nextFill = nextTrack && nextTrack.querySelector(".rating-progress-fill");
+        var oldValue = oldTrack ? Number(oldTrack.getAttribute("aria-valuenow")) : NaN;
+        var oldMax = oldTrack ? Number(oldTrack.getAttribute("aria-valuemax")) : 0;
+        var nextValue = nextTrack ? Number(nextTrack.getAttribute("aria-valuenow")) : NaN;
+        var nextWidth = nextFill ? nextFill.style.width : "";
+        if (nextFill && oldMax && oldValue !== nextValue) {
+          nextFill.style.transition = "none";
+          nextFill.style.width = Math.max(0, Math.min(100, oldValue / oldMax * 100)) + "%";
+          oldSlot.parentNode.replaceChild(replacement, oldSlot);
+          nextFill.offsetWidth;
+          window.requestAnimationFrame(function () {
+            nextFill.style.transition = "";
+            nextFill.style.width = nextWidth;
+          });
+        } else {
+          oldSlot.parentNode.replaceChild(replacement, oldSlot);
+        }
+      });
+    }
+    if (state && state.editionSlug === editionSlug) {
+      renderToc();
+      if (state.view === "edition" && state.refreshEditionList) state.refreshEditionList();
+    }
+  }
+
   function likesOf(id) {
     return store.likes[id] || {};
   }
@@ -1434,6 +2041,8 @@
     workSlug: "",
     keyword: "",
     view: "home",
+    onlyUnrated: false,
+    refreshEditionList: null,
   };
 
   var refs = {
@@ -1486,6 +2095,9 @@
       window.clearTimeout(readingScrollTimer);
     }
     readingScrollTimer = null;
+    if (window.MythosWitch && window.MythosWitch.setReadingPresence) {
+      window.MythosWitch.setReadingPresence(false);
+    }
     if (activeReadingId && readingProgressParts) {
       var current = readingProgressParts.getValue
         ? readingProgressParts.getValue()
@@ -1504,6 +2116,56 @@
     var remembered = readingEntryOf(id);
     activeReadingId = id;
     readingProgressParts = parts;
+    var presenceLastY = window.scrollY;
+    var presenceDownDistance = 0;
+    var presenceUpDistance = 0;
+    var presenceDimmed = false;
+
+    function setWitchPresence(dimmed) {
+      if (presenceDimmed === dimmed) return;
+      presenceDimmed = dimmed;
+      if (window.MythosWitch && window.MythosWitch.setReadingPresence) {
+        window.MythosWitch.setReadingPresence(dimmed);
+      }
+    }
+
+    function resetWitchPresence() {
+      presenceLastY = window.scrollY;
+      presenceDownDistance = 0;
+      presenceUpDistance = 0;
+      setWitchPresence(false);
+    }
+
+    function updateWitchPresence() {
+      if (isMobileLayout()) {
+        resetWitchPresence();
+        return;
+      }
+      var y = window.scrollY;
+      var delta = y - presenceLastY;
+      presenceLastY = y;
+      var scorePanel = document.getElementById("score-panel");
+      var scoreReached = !!(
+        scorePanel &&
+        scorePanel.getBoundingClientRect().top <= window.innerHeight * 0.85
+      );
+
+      if (y <= 80 || scoreReached) {
+        presenceDownDistance = 0;
+        presenceUpDistance = 0;
+        setWitchPresence(false);
+        return;
+      }
+      if (delta > 0) {
+        presenceDownDistance += delta;
+        presenceUpDistance = 0;
+      } else if (delta < 0) {
+        presenceUpDistance += -delta;
+        presenceDownDistance = 0;
+      }
+      if (presenceUpDistance >= 18) setWitchPresence(false);
+      else if (presenceDownDistance >= 72) setWitchPresence(true);
+    }
 
     function currentProgress() {
       var root = document.scrollingElement || document.documentElement;
@@ -1523,6 +2185,7 @@
     }
 
     function scheduleSave() {
+      updateWitchPresence();
       paintProgress(currentProgress());
       if (readingScrollTimer) window.clearTimeout(readingScrollTimer);
       readingScrollTimer = window.setTimeout(function () {
@@ -1534,6 +2197,7 @@
     readingScrollHandler = scheduleSave;
     window.addEventListener("scroll", readingScrollHandler, { passive: true });
     paintProgress(remembered ? remembered.progress : 0);
+    resetWitchPresence();
 
     if (restorePosition && remembered && remembered.progress > 0.02) {
       window.requestAnimationFrame(function () {
@@ -1541,15 +2205,18 @@
         var max = Math.max(0, root.scrollHeight - window.innerHeight);
         if (max > 0) window.scrollTo(0, Math.round(max * remembered.progress));
         paintProgress(currentProgress());
+        resetWitchPresence();
       });
     } else {
       paintProgress(currentProgress());
+      resetWitchPresence();
     }
   }
 
-  function showToast(message) {
+  function showToast(message, duration) {
     if (!refs.toastRoot) return;
     if (toastTimer) window.clearTimeout(toastTimer);
+    var durationMs = typeof duration === "number" && duration > 0 ? duration : 2400;
     clear(refs.toastRoot);
     refs.toastRoot.appendChild(el("span", null, message));
     refs.toastRoot.hidden = false;
@@ -1557,7 +2224,7 @@
       refs.toastRoot.hidden = true;
       clear(refs.toastRoot);
       toastTimer = null;
-    }, 2400);
+    }, durationMs);
   }
 
   /* ---------- 阅读主题 ---------- */
@@ -4049,6 +4716,13 @@
   function renderToc() {
     var scrollTop = refs.toc.scrollTop;
     clear(refs.toc);
+    var editionForProgress = findEdition(state.editionSlug);
+    var progress = ratingProgressAvailable(editionForProgress)
+      ? ratingProgressData(editionForProgress)
+      : null;
+    var ratedIds = progress && progress.status === "loaded"
+      ? progress.ratedWorkIds
+      : [];
 
     var overview = el("button", "toc-overview");
     overview.type = "button";
@@ -4102,6 +4776,9 @@
       if (work.slug === state.workSlug) item.setAttribute("aria-current", "true");
       item.appendChild(el("span", "toc-no", String(work.no).padStart(2, "0")));
       item.appendChild(el("span", "toc-title", work.title));
+      if (ratedIds.indexOf(workId(state.editionSlug, work.slug)) !== -1) {
+        item.appendChild(el("span", "toc-rated", "已评"));
+      }
       item.addEventListener("click", function () {
         location.hash =
           "#/" + state.editionSlug + "/" + encodeURIComponent(work.slug);
@@ -4264,6 +4941,8 @@
           "历史档案已封存，仅供阅读；原届评分与评议数据未随资料迁入。",
         ),
       );
+      var archivedProgress = renderRatingProgress(edition, true, id);
+      if (archivedProgress) panel.appendChild(archivedProgress);
       return panel;
     }
 
@@ -4301,6 +4980,9 @@
       );
       return panel;
     }
+
+    var ratingProgress = renderRatingProgress(edition, true, id);
+    if (ratingProgress) panel.appendChild(ratingProgress);
 
     if (phase === "征文") {
       var dueHint = phaseDeadlineOf(state.editionSlug, "征文");
@@ -4429,13 +5111,16 @@
           dangan: draft.dangan,
           overall: draft.overall,
         })
-          .then(function () {
+          .then(function (result) {
             ratingSubmitted = true;
-            notifyWitch("rating-success");
+            if (!(result && result.achievementNoticePending)) {
+              notifyWitch("rating-success");
+            }
             return loadCloudWorkBundle(id, true);
           })
           .then(function () {
             panel.parentNode.replaceChild(renderScorePanel(id), panel);
+            loadCloudRatingProgress(state.editionSlug, true).catch(function () {});
           })
           .catch(function (e) {
             alert(e.message || String(e));
@@ -4444,6 +5129,7 @@
           });
         return;
       }
+      var ratedCountBefore = localRatedWorkIds(findEdition(state.editionSlug)).length;
       var list = ratingsOf(id).slice();
       var record = {
         id: existing ? existing.id : newId(),
@@ -4463,9 +5149,30 @@
       }
       if (!replaced) list.push(record);
       store.ratings[id] = list;
+      var ratedCountAfter = localRatedWorkIds(findEdition(state.editionSlug)).length;
+      var achievementDefinition = null;
+      var achievementUnlockedNow = false;
+      if (state.editionSlug === RATING_PROGRESS_EDITION && ratedCountAfter > ratedCountBefore) {
+        achievementDefinition = ratingAchievementDefinitions(findEdition(state.editionSlug).works.length).find(function (item) {
+          return item.threshold > ratedCountBefore && item.threshold <= ratedCountAfter;
+        }) || null;
+        if (achievementDefinition) {
+          var achievementId = state.editionSlug + "::" + user.qq + "::" + achievementDefinition.key;
+          if (!store.ratingAchievements[achievementId]) {
+            var unlockedAt = new Date().toISOString();
+            store.ratingAchievements[achievementId] = {
+              unlockedAt: unlockedAt,
+              notifiedAt: unlockedAt,
+            };
+            achievementUnlockedNow = true;
+          }
+        }
+      }
       persist();
       panel.parentNode.replaceChild(renderScorePanel(id), panel);
-      notifyWitch("rating-success");
+      renderToc();
+      if (achievementUnlockedNow) showRatingAchievementNotice(state.editionSlug, achievementDefinition);
+      else notifyWitch("rating-success");
     });
     actions.appendChild(submit);
     actions.appendChild(hint);
@@ -5098,16 +5805,171 @@
     };
   }
 
+  function updateWitchRatingProgress(edition, progress) {
+    if (!window.MythosWitch || !window.MythosWitch.setRatingProgress) return;
+    if (
+      !ratingProgressAvailable(edition) ||
+      !progress ||
+      progress.status !== "loaded" ||
+      Number(progress.eligibleWorkCount) <= 0
+    ) {
+      if (!progress || progress.status !== "error") {
+        window.MythosWitch.setRatingProgress(null);
+      }
+      return;
+    }
+    var total = Number(progress.eligibleWorkCount) || edition.works.length;
+    var count = Math.min(Number(progress.ratedCount) || 0, total);
+    var achievements = Array.isArray(progress.achievements) ? progress.achievements : [];
+    var nextAchievement = progress.nextAchievement || achievements.find(function (item) { return !item.unlocked; }) || null;
+    window.MythosWitch.setRatingProgress({
+      status: "loaded",
+      editionSlug: edition.slug,
+      ratedCount: count,
+      eligibleWorkCount: total,
+      achievements: achievements,
+      nextAchievement: nextAchievement,
+      percent: ratingPercent(progress, total),
+      complete: count >= total,
+    });
+  }
+
   function updateWitchContext() {
     if (window.MythosWitch && window.MythosWitch.update) {
       window.MythosWitch.update(getWitchContext());
     }
+    var edition = findEdition(state.editionSlug) || editions[0] || null;
+    var progress = edition && ratingProgressAvailable(edition)
+      ? ratingProgressData(edition)
+      : null;
+    updateWitchRatingProgress(edition, progress);
   }
 
   function notifyWitch(eventName) {
     if (window.MythosWitch && window.MythosWitch.notify) {
       window.MythosWitch.notify(eventName);
     }
+  }
+
+  function whiteShipPrefersReducedMotion() {
+    return !!(
+      window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    );
+  }
+
+  function pickWhiteShipDestination() {
+    var featured = findEdition(WHITE_SHIP_EDITION_SLUG) || editions[0] || null;
+    var featuredWorks = featured && Array.isArray(featured.works)
+      ? featured.works.filter(Boolean)
+      : [];
+    var otherEditions = editions.filter(function (edition) {
+      return (
+        edition &&
+        edition !== featured &&
+        Array.isArray(edition.works) &&
+        edition.works.some(Boolean)
+      );
+    });
+    if (!featuredWorks.length && !otherEditions.length) return null;
+
+    var roll = Math.floor(Math.random() * 100) + 1;
+    var targetEdition;
+    if (featuredWorks.length && (roll <= 50 || !otherEditions.length)) {
+      targetEdition = featured;
+    } else if (otherEditions.length) {
+      targetEdition = otherEditions[
+        Math.floor(Math.random() * otherEditions.length)
+      ];
+    } else {
+      targetEdition = featured;
+    }
+
+    var works = targetEdition.works.filter(Boolean);
+    if (
+      works.length > 1 &&
+      targetEdition.slug === state.editionSlug &&
+      state.workSlug
+    ) {
+      var withoutCurrent = works.filter(function (work) {
+        return work.slug !== state.workSlug;
+      });
+      if (withoutCurrent.length) works = withoutCurrent;
+    }
+    if (!works.length) return null;
+    return {
+      edition: targetEdition,
+      work: works[Math.floor(Math.random() * works.length)],
+      roll: roll,
+    };
+  }
+
+  function travelByWhiteShip() {
+    if (whiteShipBusy) return;
+    if (!isLoggedIn()) {
+      showAuthGate();
+      return;
+    }
+    var destination = pickWhiteShipDestination();
+    if (!destination) {
+      showToast("白船暂时没有可抵达的档案。");
+      return;
+    }
+
+    whiteShipBusy = true;
+    var reduced = whiteShipPrefersReducedMotion();
+    var rollLabel = String(destination.roll).padStart(2, "0");
+    var message =
+      "白船靠岸了。下一站是《" + destination.work.title + "》。";
+    var combinedMessage = "1D100 = " + rollLabel + " · " + message;
+    var desktopMotion = !reduced && !isMobileLayout();
+    if (
+      desktopMotion &&
+      window.MythosWitch &&
+      window.MythosWitch.startWhiteShipRoll
+    ) {
+      window.MythosWitch.startWhiteShipRoll(destination.roll, reduced);
+    }
+    if (desktopMotion) {
+      window.setTimeout(function () {
+        document.body.classList.add("is-white-ship-departing");
+        if (
+          window.MythosWitch &&
+          window.MythosWitch.showWhiteShipDeparture
+        ) {
+          window.MythosWitch.showWhiteShipDeparture();
+        } else if (window.MythosWitch && window.MythosWitch.setState) {
+          window.MythosWitch.setState("departing");
+        }
+      }, WHITE_SHIP_DEPARTURE_START_MS);
+    }
+    var delay = reduced ? 0 : WHITE_SHIP_ROUTE_DELAY_MS;
+    window.setTimeout(function () {
+      location.hash =
+        "#/" +
+        destination.edition.slug +
+        "/" +
+        encodeURIComponent(destination.work.slug);
+      window.setTimeout(function () {
+        document.body.classList.remove("is-white-ship-departing");
+        whiteShipBusy = false;
+        if (window.MythosWitch && window.MythosWitch.finishWhiteShipRoll) {
+          window.MythosWitch.finishWhiteShipRoll();
+        }
+        if (
+          desktopMotion &&
+          window.MythosWitch &&
+          window.MythosWitch.speakText
+        ) {
+          window.MythosWitch.speakText(combinedMessage);
+        } else {
+          if (window.MythosWitch && window.MythosWitch.setState) {
+            window.MythosWitch.setState("idle");
+          }
+          showToast(combinedMessage, WHITE_SHIP_MESSAGE_MS);
+        }
+      }, reduced ? 0 : 100);
+    }, delay);
   }
 
   function openVisitorAccountModal() {
@@ -5641,6 +6503,7 @@
 
   function renderHome() {
     stopReadingTracking();
+    state.refreshEditionList = null;
     if (sectionObserver) {
       sectionObserver.disconnect();
       sectionObserver = null;
@@ -5688,6 +6551,8 @@
     heroState.appendChild(phaseLine);
     var timeline = renderPhaseTimeline(edition.slug);
     if (timeline) heroState.appendChild(timeline);
+    var ratingProgress = renderRatingProgress(edition, false);
+    if (ratingProgress) heroState.appendChild(ratingProgress);
     var stats = el("dl", "home-stats");
     var countCell = el("div");
     countCell.appendChild(el("dt", null, "收录"));
@@ -5742,6 +6607,8 @@
 
   function renderEditionOverview(edition) {
     stopReadingTracking();
+    state.refreshEditionList = null;
+    state.onlyUnrated = false;
     if (!edition) {
       renderHome();
       return;
@@ -5768,6 +6635,8 @@
     headTools.appendChild(back);
     head.appendChild(headTools);
     shell.appendChild(head);
+    var ratingProgress = renderRatingProgress(edition, false);
+    if (ratingProgress) shell.appendChild(ratingProgress);
 
     var controls = el("div", "edition-controls");
     var search = el("input", "edition-search");
@@ -5778,6 +6647,14 @@
     controls.appendChild(search);
     var hint = el("span", "edition-count-hint");
     controls.appendChild(hint);
+    var filterUnrated = null;
+    if (ratingProgressAvailable(edition)) {
+      filterUnrated = el("button", "btn-ghost btn-tiny edition-unrated-filter", "只看未评");
+      filterUnrated.type = "button";
+      filterUnrated.disabled = !canInteract();
+      filterUnrated.setAttribute("aria-pressed", "false");
+      controls.appendChild(filterUnrated);
+    }
     shell.appendChild(controls);
 
     var list = el("div", "edition-index");
@@ -5785,10 +6662,24 @@
     function paint() {
       clear(list);
       var needle = state.keyword.trim().toLowerCase();
+      var progress = ratingProgressAvailable(edition)
+        ? (USE_CLOUD ? cloudRatingProgress[edition.slug] : localRatingProgress(edition))
+        : null;
+      var ratedIds = progress && progress.status === "loaded"
+        ? progress.ratedWorkIds
+        : [];
       var shown = edition.works.filter(function (work) {
+        var id = workId(edition.slug, work.slug);
+        if (state.onlyUnrated && ratedIds.indexOf(id) !== -1) return false;
         return !needle || workSearchText(work).indexOf(needle) !== -1;
       });
-      hint.textContent = "显示 " + shown.length + " / " + edition.works.length + " 篇";
+      hint.textContent = (state.onlyUnrated ? "只看未评 · " : "显示 ") + shown.length + " / " + edition.works.length + " 篇";
+      if (filterUnrated) {
+        filterUnrated.disabled = !progress || progress.status !== "loaded";
+        filterUnrated.classList.toggle("is-active", state.onlyUnrated);
+        filterUnrated.textContent = state.onlyUnrated ? "显示全部作品" : "只看未评";
+        filterUnrated.setAttribute("aria-pressed", state.onlyUnrated ? "true" : "false");
+      }
       if (!shown.length) {
         list.appendChild(el("p", "spotlight-empty", "没有匹配的作品。"));
         return;
@@ -5812,8 +6703,18 @@
           location.hash = "#/" + edition.slug + "/" + encodeURIComponent(work.slug);
         });
         row.appendChild(title);
+        var isRated = ratedIds.indexOf(workId(edition.slug, work.slug)) !== -1;
+        if (isRated) row.appendChild(el("span", "edition-index-rated", "已评"));
+        row.dataset.workId = workId(edition.slug, work.slug);
         row.appendChild(el("span", "edition-index-author", work.author));
         list.appendChild(row);
+      });
+    }
+    if (filterUnrated) {
+      filterUnrated.addEventListener("click", function () {
+        if (filterUnrated.disabled) return;
+        state.onlyUnrated = !state.onlyUnrated;
+        paint();
       });
     }
     search.addEventListener("input", function () {
@@ -5821,6 +6722,7 @@
       paint();
     });
     paint();
+    state.refreshEditionList = paint;
     refs.content.appendChild(shell);
   }
 
@@ -5870,6 +6772,7 @@
 
   function renderWork(edition, work) {
     clear(refs.content);
+    state.refreshEditionList = null;
     var id = workId(edition.slug, work.slug);
     recordReadingOpen(edition, work);
     if (window.MythosWitch && window.MythosWitch.recordArticleOpen) {
@@ -6210,6 +7113,7 @@
       showAuthGate();
       return;
     }
+    state.refreshEditionList = null;
     refreshChrome();
     setTopMenuOpen(false);
     // 「跳到投票区」只在作品页有意义：先收起来，由 renderWork 重新点亮
@@ -6298,6 +7202,7 @@
   });
 
   window.addEventListener("hashchange", route);
+  window.addEventListener("mythos:white-ship", travelByWhiteShip);
 
   ensureAdminSeed()
     .then(function () {

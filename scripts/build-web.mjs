@@ -21,7 +21,7 @@ const WITCH_CUBE_ASSET = path.join(
   "witch-cube-v1.webp",
 );
 const BRAND_URL = "./archive-brand.webp?v=20260921-brand";
-const STATIC_VERSION = "20260921-witch-v5";
+const STATIC_VERSION = "20260923-rating-achievements-v5";
 const PUBLIC_ORIGIN = String(process.env.ARCHIVE_PUBLIC_ORIGIN || "").replace(/\/+$/, "");
 if (!ENV_ID || !API_URL) {
   console.error(

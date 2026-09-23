@@ -69,6 +69,19 @@ const SPOTLIGHT_DEFAULT_COUNT = 3;
 const SPOTLIGHT_MAX_COUNT = 5;
 const SPOTLIGHT_DEFAULT_TIMEZONE = "Asia/Hong_Kong";
 const CATALOGUE_MANIFEST_PATH = path.join(__dirname, "catalogue.json");
+const RATING_ACHIEVEMENT_TITLES = {
+  5: "初次下潜",
+  10: "梦境回响",
+  15: "迷雾渐深",
+  20: "异梦拾遗",
+  25: "夜航者",
+  30: "深层勘探",
+  35: "梦域行者",
+  40: "长夜巡礼",
+  45: "近梦尽头",
+  50: "梦境守秘",
+  53: "幻梦全录",
+};
 
 // SMTP 配置只读环境变量：授权码绝不写入源码、日志或仓库
 const SMTP_CONFIG = {
@@ -129,6 +142,16 @@ db.exec(`
     overall INTEGER NOT NULL,
     t TEXT NOT NULL,
     UNIQUE(workId, qq)
+  );
+
+  CREATE TABLE IF NOT EXISTS rating_achievements (
+    id TEXT PRIMARY KEY,
+    qq TEXT NOT NULL,
+    editionSlug TEXT NOT NULL,
+    achievementKey TEXT NOT NULL,
+    unlockedAt TEXT NOT NULL,
+    notifiedAt TEXT,
+    UNIQUE(qq, editionSlug, achievementKey)
   );
 
   CREATE TABLE IF NOT EXISTS comments (
@@ -201,6 +224,9 @@ db.exec(`
   -- 聚合报表与届别洞察按作品前缀筛选；这些索引避免每次都扫完整表。
   CREATE INDEX IF NOT EXISTS idx_ratings_work_aggregate
     ON ratings(workId);
+
+  CREATE INDEX IF NOT EXISTS idx_ratings_qq_work
+    ON ratings(qq, workId);
 
   CREATE INDEX IF NOT EXISTS idx_comments_work_aggregate
     ON comments(workId, t);
@@ -450,6 +476,106 @@ function manifestCatalogueIds(editionSlug) {
       ),
     ),
   );
+}
+
+function ratingAchievementDefinitions(total) {
+  const count = Math.max(0, Number(total) || 0);
+  const thresholds = [];
+  for (let threshold = 5; threshold < count; threshold += 5) {
+    thresholds.push(threshold);
+  }
+  if (count > 0) thresholds.push(count);
+  return Array.from(new Set(thresholds)).map((threshold) => {
+    const isFirst = threshold === 5;
+    const isComplete = threshold === count;
+    const title = RATING_ACHIEVEMENT_TITLES[threshold] ||
+      (isComplete ? "幻梦全录" : "第" + Math.ceil(threshold / 5) + "层回声");
+    let description;
+    if (isFirst) {
+      description = "你已为本届 5 份档案留下评议。幻梦境的门，已经向你敞开。";
+    } else if (isComplete) {
+      description = "你已为本届全部 " + count + " 份档案留下评议。此番下潜，幻梦境已被你完整记录。";
+    } else {
+      description = "你已为本届 " + threshold + " 份档案留下评议。梦境的回声，又向深处延伸一步。";
+    }
+    return {
+      key: isFirst ? "first-five" : isComplete ? "full-volume" : "rated-" + threshold,
+      threshold,
+      title,
+      description,
+    };
+  });
+}
+
+function ratingProgressForUser(qq, editionSlug) {
+  const eligibleWorkIds = manifestCatalogueIds(editionSlug);
+  const eligible = new Set(eligibleWorkIds);
+  const ratedWorkIds = db
+    .prepare("SELECT workId FROM ratings WHERE qq = ?")
+    .all(qq)
+    .map((row) => row.workId)
+    .filter((workId) => eligible.has(workId));
+  return {
+    editionSlug,
+    ratedWorkIds,
+    ratedCount: ratedWorkIds.length,
+    eligibleWorkCount: eligibleWorkIds.length,
+    milestone: 5,
+  };
+}
+
+function ratingProgressWithAchievements(qq, progress) {
+  const definitions = ratingAchievementDefinitions(progress.eligibleWorkCount);
+  const existingRows = db.prepare(
+    "SELECT achievementKey, unlockedAt, notifiedAt FROM rating_achievements WHERE qq = ? AND editionSlug = ?",
+  ).all(qq, progress.editionSlug);
+  const existing = new Map(existingRows.map((row) => [row.achievementKey, row]));
+  const missingReached = definitions.filter((definition) =>
+    definition.threshold <= progress.ratedCount && !existing.has(definition.key),
+  );
+  const newestMissingKey = missingReached.length
+    ? missingReached[missingReached.length - 1].key
+    : "";
+  const now = new Date().toISOString();
+  missingReached.forEach((definition) => {
+    const notifiedAt = definition.key === newestMissingKey ? null : now;
+    db.prepare(
+      "INSERT OR IGNORE INTO rating_achievements (id, qq, editionSlug, achievementKey, unlockedAt, notifiedAt) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(
+      ratingAchievementId(qq, progress.editionSlug, definition.key),
+      qq,
+      progress.editionSlug,
+      definition.key,
+      now,
+      notifiedAt,
+    );
+  });
+
+  const rows = db.prepare(
+    "SELECT achievementKey, unlockedAt, notifiedAt FROM rating_achievements WHERE qq = ? AND editionSlug = ?",
+  ).all(qq, progress.editionSlug);
+  const byKey = new Map(rows.map((row) => [row.achievementKey, row]));
+  const achievements = definitions.map((definition) => {
+    const row = byKey.get(definition.key);
+    return Object.assign({}, definition, {
+      unlocked: !!row,
+      noticePending: !!(row && !row.notifiedAt),
+      unlockedAt: row ? row.unlockedAt : null,
+    });
+  });
+  const pendingAchievements = achievements.filter((item) => item.noticePending);
+  const nextAchievement = achievements.find((item) => !item.unlocked) || null;
+  return Object.assign({}, progress, {
+    achievements,
+    pendingAchievements,
+    nextAchievement,
+    achievementUnlocked: achievements.some((item) => item.unlocked),
+    achievementNoticePending: pendingAchievements.length > 0,
+  });
+}
+
+function ratingAchievementId(qq, editionSlug, achievementKey) {
+  return [qq, editionSlug, achievementKey].join("::");
 }
 
 function validDateKey(value) {
@@ -1354,6 +1480,38 @@ async function handle(action, payload, auth, ctx) {
       return { stars: row ? JSON.parse(row.slugs || "[]") : [] };
     }
 
+    case "getMyRatingProgress": {
+      if (!user || (session.role !== "member" && session.role !== "admin")) {
+        throw new Error("请登录后查看评议进度。");
+      }
+      const editionSlug = String(payload.editionSlug || "");
+      const progress = ratingProgressForUser(user.qq, editionSlug);
+      return ratingProgressWithAchievements(user.qq, progress);
+    }
+
+    case "claimRatingAchievement": {
+      if (!user || (session.role !== "member" && session.role !== "admin")) {
+        throw new Error("请登录后领取成就提示。");
+      }
+      const editionSlug = String(payload.editionSlug || "");
+      const progress = ratingProgressForUser(user.qq, editionSlug);
+      const progressWithAchievements = ratingProgressWithAchievements(user.qq, progress);
+      const pending = progressWithAchievements.pendingAchievements || [];
+      const requestedKey = String(payload.achievementKey || "");
+      const achievement = requestedKey
+        ? pending.find((item) => item.key === requestedKey)
+        : pending[0];
+      if (!achievement) return { claimed: false };
+      const now = new Date().toISOString();
+      const result = db.prepare(
+        "UPDATE rating_achievements SET notifiedAt = ? WHERE qq = ? AND editionSlug = ? AND achievementKey = ? AND notifiedAt IS NULL",
+      ).run(now, user.qq, editionSlug, achievement.key);
+      return {
+        claimed: Number(result.changes) > 0,
+        achievement: Object.assign({}, achievement, { noticePending: false }),
+      };
+    }
+
     case "setStars": {
       if (!user || session.role === "visitor") throw new Error("无权操作");
       const editionSlug = String(payload.editionSlug || "");
@@ -1375,6 +1533,10 @@ async function handle(action, payload, auth, ctx) {
       const editionSlug = workId.split("/")[0];
       const st = editionState(settings, editionSlug);
       if (st.phase !== "评分") throw new Error("当前不在大众评分阶段");
+      const eligibleWorkIds = manifestCatalogueIds(editionSlug);
+      if (eligibleWorkIds.indexOf(workId) === -1) {
+        throw new Error("这份档案不在当前届别的可评作品目录中。");
+      }
       const chuanlu = Number(payload.chuanlu);
       const dangan = Number(payload.dangan);
       const overall = Number(payload.overall);
@@ -1383,15 +1545,54 @@ async function handle(action, payload, auth, ctx) {
       }
       const id = workId + "::" + user.qq;
       const t = new Date().toISOString();
-      db.prepare(`
-        INSERT INTO ratings (id, workId, qq, chuanlu, dangan, overall, t)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(workId, qq) DO UPDATE SET
-          chuanlu = excluded.chuanlu,
-          dangan = excluded.dangan,
-          overall = excluded.overall,
-          t = excluded.t
-      `).run(id, workId, user.qq, chuanlu, dangan, overall, t);
+      let ratedCountBefore = 0;
+      let ratedCountAfter = 0;
+      let achievementUnlockedNow = false;
+      let unlockedAchievement = null;
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        ratedCountBefore = ratingProgressForUser(user.qq, editionSlug).ratedCount;
+        db.prepare(`
+          INSERT INTO ratings (id, workId, qq, chuanlu, dangan, overall, t)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(workId, qq) DO UPDATE SET
+            chuanlu = excluded.chuanlu,
+            dangan = excluded.dangan,
+            overall = excluded.overall,
+            t = excluded.t
+        `).run(id, workId, user.qq, chuanlu, dangan, overall, t);
+        ratedCountAfter = ratingProgressForUser(user.qq, editionSlug).ratedCount;
+
+        const definitions = ratingAchievementDefinitions(eligibleWorkIds.length);
+        definitions.forEach((definition) => {
+          if (ratedCountBefore >= definition.threshold || ratedCountAfter < definition.threshold) return;
+          const inserted = db.prepare(
+            "INSERT OR IGNORE INTO rating_achievements (id, qq, editionSlug, achievementKey, unlockedAt, notifiedAt) VALUES (?, ?, ?, ?, ?, NULL)",
+          ).run(
+            ratingAchievementId(user.qq, editionSlug, definition.key),
+            user.qq,
+            editionSlug,
+            definition.key,
+            t,
+          );
+          if (Number(inserted.changes) > 0) {
+            achievementUnlockedNow = true;
+            unlockedAchievement = Object.assign({}, definition, {
+              unlocked: true,
+              noticePending: true,
+              unlockedAt: t,
+            });
+          }
+        });
+        db.exec("COMMIT");
+      } catch (err) {
+        try {
+          db.exec("ROLLBACK");
+        } catch (rollbackError) {
+          /* ignore rollback failure */
+        }
+        throw err;
+      }
 
       const record = {
         id,
@@ -1402,7 +1603,21 @@ async function handle(action, payload, auth, ctx) {
         overall,
         t,
       };
-      return { rating: record };
+      const finalProgress = ratingProgressWithAchievements(
+        user.qq,
+        ratingProgressForUser(user.qq, editionSlug),
+      );
+      const achievementNoticePending = finalProgress.achievementNoticePending;
+      return {
+        rating: record,
+        wasFirstRatingForWork: ratedCountBefore < ratedCountAfter,
+        ratedCountAfter,
+        eligibleWorkCount: eligibleWorkIds.length,
+        achievementUnlocked: achievementUnlockedNow || achievementNoticePending,
+        achievementUnlockedNow,
+        achievementNoticePending,
+        unlockedAchievement,
+      };
     }
 
     case "toggleLike": {
