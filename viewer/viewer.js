@@ -35,6 +35,9 @@
     53: "幻梦全录",
   };
   var BRAND_ASSET_URL = "./archive-brand.webp?v=20260921-brand";
+  /* 启动阶段的只读请求上限。超时后由启动失败面板给出明确状态与重试入口，
+     不让启动遮罩因为接口不返回而永久停留。 */
+  var BOOT_TIMEOUT_MS = 6000;
   var WHITE_SHIP_EDITION_SLUG = "2026";
   var WHITE_SHIP_DEPARTURE_START_MS = 560;
   var WHITE_SHIP_ROUTE_DELAY_MS = 780;
@@ -678,7 +681,7 @@
   }
 
   function cloudBootstrap() {
-    return window.MythosAPI.bootstrap().then(function (data) {
+    return window.MythosAPI.bootstrap({ timeoutMs: BOOT_TIMEOUT_MS }).then(function (data) {
       applyCloudAuthData(data);
       if (data && data.session && data.session.token) {
         window.MythosAPI.setToken(data.session.token);
@@ -2833,6 +2836,9 @@
     document.body.classList.remove("is-booting");
     var splash = document.getElementById("boot-splash");
     if (splash) splash.hidden = true;
+    // 只有真实的启动状态处理完成后才让开场让出页面，
+    // 不在 DOMContentLoaded 就假装接口和页面都准备好了。
+    if (window.DreamGate && window.DreamGate.ready) window.DreamGate.ready();
   }
 
   function showAuthGate() {
@@ -2848,6 +2854,8 @@
   }
 
   function hideAuthGate() {
+    // 进入档案后才需要展示标题字体，避免它在启动阶段和接口、脚本抢带宽。
+    document.documentElement.classList.add("is-archive");
     refs.authGate.hidden = true;
     if (window.MythosWitch && window.MythosWitch.restoreAfterModal) {
       window.MythosWitch.restoreAfterModal();
@@ -9077,26 +9085,99 @@
   window.addEventListener("hashchange", route);
   window.addEventListener("mythos:white-ship", travelByWhiteShip);
 
-  ensureAdminSeed()
-    .then(function () {
-      if (USE_CLOUD) return cloudBootstrap();
-      return null;
-    })
-    .then(function () {
-      if (!isLoggedIn()) showAuthGate();
-      else hideAuthGate();
-    })
-    .catch(function (err) {
-      console.error(err);
-      finishBoot();
+  /* ---------- 启动失败与重试 ---------- */
+
+  function bootErrorMessage(error) {
+    var message = error && error.message ? error.message : String(error || "未知错误");
+    if (message.indexOf("请求超时") === 0) return message;
+    if (message.indexOf("无法连接到服务器") === 0) return message;
+    return "启动时发生问题：" + message;
+  }
+
+  function closeBootError() {
+    var panel = document.getElementById("boot-error");
+    if (panel) panel.hidden = true;
+  }
+
+  function showBootError(error) {
+    // 只有确实被启动遮罩挡住的主入口才弹全屏失败面板；
+    // 深链接的 prerender 页面正文是静态内容，不需要接口也能读，保持原兜底路径。
+    var wasBooting = document.body.classList.contains("is-booting");
+    if (window.DreamGate && window.DreamGate.hide) window.DreamGate.hide("error");
+    finishBoot();
+    var panel = document.getElementById("boot-error");
+    if (!panel || !wasBooting) {
+      // 旧版页面没有失败面板时保留原有兜底：给出提示并回到登录门。
       clear(refs.content);
       refs.content.appendChild(
         el(
           "p",
           "toc-empty",
-          "初始化失败：" + (err && err.message ? err.message : String(err)),
+          "初始化失败：" + (error && error.message ? error.message : String(error)),
         ),
       );
       showAuthGate();
+      return;
+    }
+    var copy = document.getElementById("boot-error-copy");
+    if (copy) copy.textContent = bootErrorMessage(error);
+    var retry = document.getElementById("boot-error-retry");
+    if (retry) {
+      retry.disabled = false;
+      retry.textContent = "重试";
+    }
+    panel.hidden = false;
+    if (retry) {
+      try {
+        retry.focus({ preventScroll: true });
+      } catch (focusError) {
+        /* 聚焦失败不影响错误提示 */
+      }
+    }
+  }
+
+  function bootApp() {
+    closeBootError();
+    return ensureAdminSeed()
+      .then(function () {
+        if (USE_CLOUD) return cloudBootstrap();
+        return null;
+      })
+      .then(function () {
+        if (!isLoggedIn()) showAuthGate();
+        else hideAuthGate();
+      });
+  }
+
+  var bootRetrying = false;
+  var bootRetryButton = document.getElementById("boot-error-retry");
+  var bootGateButton = document.getElementById("boot-error-gate");
+  if (bootRetryButton) {
+    bootRetryButton.addEventListener("click", function () {
+      if (bootRetrying) return;
+      bootRetrying = true;
+      bootRetryButton.disabled = true;
+      bootRetryButton.textContent = "正在重试…";
+      bootApp()
+        .then(function () {
+          bootRetrying = false;
+        })
+        .catch(function (err) {
+          bootRetrying = false;
+          console.error(err);
+          showBootError(err);
+        });
     });
+  }
+  if (bootGateButton) {
+    bootGateButton.addEventListener("click", function () {
+      closeBootError();
+      showAuthGate();
+    });
+  }
+
+  bootApp().catch(function (err) {
+    console.error(err);
+    showBootError(err);
+  });
 })();

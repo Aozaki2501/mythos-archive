@@ -22,32 +22,65 @@
     }
   }
 
-  function call(action, payload) {
+  // 超时按调用方传入的 options.timeoutMs 生效，默认不设超时：
+  // 发验证码、评分、评论等写请求可能本身就要十几秒，客户端超时会让用户误以为没提交成功。
+  // 需要限时的只读请求（例如启动时的 bootstrap）由调用方显式传入。
+  function call(action, payload, options) {
+    var timeoutMs = Number(options && options.timeoutMs) > 0 ? Number(options.timeoutMs) : 0;
     var headers = { "Content-Type": "application/json" };
     var token = getToken();
     if (token) headers.Authorization = "Bearer " + token;
-    return fetch(API_URL, {
+    var init = {
       method: "POST",
       headers: headers,
       body: JSON.stringify({ action: action, payload: payload || {} }),
-    }).catch(function (netErr) {
+    };
+    var controller = null;
+    var timer = null;
+    if (timeoutMs && typeof AbortController === "function") {
+      controller = new AbortController();
+      init.signal = controller.signal;
+      timer = setTimeout(function () {
+        controller.abort();
+      }, timeoutMs);
+    }
+    function settled() {
+      if (!timer) return;
+      clearTimeout(timer);
+      timer = null;
+    }
+    function failed() {
+      settled();
+      if (controller && controller.signal.aborted) {
+        throw new Error(
+          "请求超时（" + Math.round(timeoutMs / 1000) + " 秒没有响应）。请检查网络后重试。",
+        );
+      }
       throw new Error("无法连接到服务器。请检查网络（若刚切换或关闭代理，请重启浏览器或刷新页面）。");
-    }).then(function (res) {
-      return res.json().then(function (body) {
-        if (!res.ok || (body && body.ok === false)) {
-          var msg =
-            (body && (body.error || body.msg || body.message)) ||
-            "请求失败 (" + res.status + ")";
-          if (typeof msg === "object") msg = JSON.stringify(msg);
-          throw new Error(msg);
-        }
-        // 服务端返回 { ok, data }。
-        if (body && body.data !== undefined && body.ok !== undefined) {
-          return body.data;
-        }
-        return body;
-      });
-    });
+    }
+    return fetch(API_URL, init).then(function (res) {
+      return res.json().then(
+        function (body) {
+          settled();
+          if (!res.ok || (body && body.ok === false)) {
+            var msg =
+              (body && (body.error || body.msg || body.message)) ||
+              "请求失败 (" + res.status + ")";
+            if (typeof msg === "object") msg = JSON.stringify(msg);
+            throw new Error(msg);
+          }
+          // 服务端返回 { ok, data }。
+          if (body && body.data !== undefined && body.ok !== undefined) {
+            return body.data;
+          }
+          return body;
+        },
+        function (parseError) {
+          settled();
+          throw parseError;
+        },
+      );
+    }, failed);
   }
 
   global.MythosAPI = {
@@ -57,8 +90,8 @@
     getToken: getToken,
     setToken: setToken,
     call: call,
-    bootstrap: function () {
-      return call("bootstrap");
+    bootstrap: function (options) {
+      return call("bootstrap", {}, options);
     },
     login: function (qq, pass) {
       return call("login", { qq: qq, pass: pass }).then(function (data) {

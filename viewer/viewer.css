@@ -7879,7 +7879,7 @@ html[data-theme="dark"] .archive-volume-row:hover .archive-volume-year { color: 
 
 /* Self-hosted display font for interface and work headings. The article body
    keeps --article-font so this visual pass does not alter reading typography. */
-:is(
+html.is-archive :is(
   .site-title,
   .site-brand-text,
   .toc-title,
@@ -7917,6 +7917,18 @@ html[data-theme="dark"] .archive-volume-row:hover .archive-volume-year { color: 
   .work-end-title
 ) {
   font-family: var(--display-font);
+}
+
+/* 进入档案之前（启动、登录门）只用系统衬线：
+   这份标题字体有 700 KB 左右，不该在启动阶段和接口、脚本抢带宽，
+   也不该让只在登录门停留的访客白白下载。字号与字重不变，只换字族。 */
+html:not(.is-archive) :is(
+  .site-title,
+  .site-brand-text,
+  .auth-title,
+  .boot-splash-title
+) {
+  font-family: var(--article-font);
 }
 
 @media (max-width: 800px) {
@@ -7966,3 +7978,425 @@ html[data-theme="dark"] .archive-volume-row:hover .archive-volume-year { color: 
     height: 24px;
   }
 }
+
+/* ---------- 梦门开场 ---------- */
+/* 取色规则与站点一致：深靛沿用夜间主题的墨蓝底，点缀只用褪色朱红（--accent），
+   金色按设计规范不使用。纸页取 var(--bg)，开场第一帧与当前主题页面无缝衔接。
+   动效只用 transform / opacity，且只播一次，不做无限循环。 */
+
+.dream-gate {
+  --dg-scene: #121622;
+  --dg-scene-mid: #1a2133;
+  --dg-scene-glow: #2b3450;
+  --dg-text: #dcd6c8;
+  --dg-muted: #8e94a3;
+  --dg-line: rgba(220, 214, 200, 0.2);
+  --dg-line-strong: rgba(220, 214, 200, 0.46);
+  --dg-seal: #cf6f5f;
+  --dg-seal-dim: rgba(207, 111, 95, 0.34);
+  --dg-paper: var(--bg);
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--dg-scene);
+  color: var(--dg-text);
+  opacity: 1;
+  transition: opacity 360ms ease;
+  isolation: isolate;
+  contain: layout paint;
+}
+
+.dream-gate[hidden] {
+  display: none !important;
+}
+
+.dream-gate.is-leaving {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 梦门成功接管时，旧的启动转圈不再显示，也不再持续占用动画帧。 */
+html.is-dream-gate .boot-splash {
+  display: none;
+}
+
+.dream-gate__sky {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at 50% 46%,
+    var(--dg-scene-glow) 0%,
+    var(--dg-scene-mid) 28%,
+    var(--dg-scene) 64%
+  );
+}
+
+.dream-gate__stars {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  width: min(82vw, 560px);
+  height: 400px;
+  transform: translate(-50%, -50%);
+  background:
+    radial-gradient(circle at 12% 28%, var(--dg-text) 0 1px, transparent 2px),
+    radial-gradient(circle at 81% 14%, #7fa3cc 0 1px, transparent 2px),
+    radial-gradient(circle at 25% 72%, var(--dg-seal) 0 1px, transparent 2px),
+    radial-gradient(circle at 91% 65%, var(--dg-text) 0 1px, transparent 2px),
+    radial-gradient(circle at 62% 9%, var(--dg-text) 0 1px, transparent 2px),
+    radial-gradient(circle at 6% 53%, #9db2c6 0 1px, transparent 2px);
+  animation: dg-stars 0.7s ease both;
+}
+
+.dream-gate__scene {
+  position: relative;
+  width: 280px;
+  height: 320px;
+  display: grid;
+  place-items: center;
+  margin-top: -64px;
+  animation: dg-emerge 0.7s ease both;
+}
+
+.dream-gate__orbit {
+  position: absolute;
+  width: 270px;
+  height: 270px;
+  border: 1px solid var(--dg-line);
+  border-radius: 50%;
+  transform: rotate(-28deg) scaleY(0.68);
+}
+
+.dream-gate__orbit::before {
+  content: "";
+  position: absolute;
+  left: 37px;
+  top: 27px;
+  width: 5px;
+  height: 5px;
+  background: var(--dg-seal);
+  border-radius: 50%;
+}
+
+.dream-gate__orbit--two {
+  width: 235px;
+  height: 235px;
+  transform: rotate(38deg) scaleY(0.8);
+  border-color: rgba(127, 163, 204, 0.24);
+}
+
+.dream-gate__arch {
+  position: relative;
+  width: 136px;
+  height: 215px;
+  border: 1px solid var(--dg-line-strong);
+  border-radius: 80px 80px 2px 2px;
+  background: linear-gradient(180deg, #232a42, #141a29 75%, rgba(207, 111, 95, 0.16));
+  box-shadow:
+    inset 0 0 0 7px #0d1119,
+    inset 0 0 0 8px rgba(220, 214, 200, 0.16);
+}
+
+.dream-gate__moon {
+  position: absolute;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  top: 38px;
+  left: 46px;
+  background: var(--dg-text);
+  box-shadow: 0 0 22px rgba(220, 214, 200, 0.18);
+}
+
+.dream-gate__moon::after {
+  content: "";
+  position: absolute;
+  inset: -4px -9px 7px 10px;
+  background: #232a42;
+  border-radius: 50%;
+}
+
+.dream-gate__sea {
+  position: absolute;
+  left: 15px;
+  right: 15px;
+  bottom: 24px;
+  height: 48px;
+  background: repeating-linear-gradient(
+    180deg,
+    transparent 0 9px,
+    rgba(220, 214, 200, 0.16) 9px 10px
+  );
+  transform: perspective(80px) rotateX(30deg);
+}
+
+.dream-gate__step {
+  position: absolute;
+  bottom: 25px;
+  width: 180px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--dg-seal-dim), transparent);
+}
+
+.dream-gate__step::after {
+  content: "";
+  position: absolute;
+  top: 12px;
+  left: -20px;
+  right: -20px;
+  height: 1px;
+  background: inherit;
+}
+
+.dream-gate__copy {
+  position: absolute;
+  top: calc(50% + 116px);
+  left: 20px;
+  right: 20px;
+  text-align: center;
+  animation: dg-copy 0.75s ease both;
+}
+
+.dream-gate__eyebrow {
+  font-family: var(--sans);
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: 0.38em;
+  color: var(--dg-muted);
+}
+
+.dream-gate__title {
+  margin: 12px 0 8px;
+  font-family: var(--article-font);
+  font-size: clamp(23px, 5vw, 30px);
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: 0.22em;
+}
+
+.dream-gate__sub {
+  font-size: 12px;
+  letter-spacing: 0.15em;
+  color: var(--dg-muted);
+}
+
+.dream-gate__line {
+  margin: 22px auto 0;
+  width: 96px;
+  height: 1px;
+  background: rgba(207, 111, 95, 0.22);
+  overflow: hidden;
+}
+
+.dream-gate__line::after {
+  content: "";
+  display: block;
+  height: 100%;
+  background: var(--dg-seal);
+  transform: scaleX(0.2);
+  transform-origin: left;
+  animation: dg-line 0.9s ease both;
+}
+
+.dream-gate__brand {
+  position: absolute;
+  left: 24px;
+  top: max(24px, env(safe-area-inset-top));
+  font-family: var(--article-font);
+  font-size: 12px;
+  letter-spacing: 0.25em;
+  color: var(--dg-muted);
+  animation: dg-copy 0.75s ease both;
+}
+
+.dream-gate__skip {
+  position: absolute;
+  right: 24px;
+  bottom: max(24px, env(safe-area-inset-bottom));
+  padding: 7px 13px;
+  background: transparent;
+  border: 1px solid var(--dg-line);
+  border-radius: var(--radius);
+  color: var(--dg-text);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+}
+
+.dream-gate__skip:hover,
+.dream-gate__skip:focus-visible {
+  border-color: var(--dg-seal);
+  color: #ffffff;
+}
+
+.dream-gate__paper {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 50.1%;
+  background: var(--dg-paper);
+  transform-origin: right center;
+  animation: dg-left 0.62s cubic-bezier(0.22, 0.7, 0.2, 1) both;
+  border-right: 1px solid var(--line-strong);
+}
+
+.dream-gate__paper--right {
+  left: auto;
+  right: 0;
+  transform-origin: left center;
+  border-right: 0;
+  border-left: 1px solid var(--line-strong);
+  animation-name: dg-right;
+}
+
+@keyframes dg-left {
+  0%,
+  10% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-101%);
+  }
+}
+
+@keyframes dg-right {
+  0%,
+  10% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(101%);
+  }
+}
+
+@keyframes dg-emerge {
+  0%,
+  12% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.94);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes dg-copy {
+  0%,
+  28% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes dg-stars {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 0.8;
+  }
+}
+
+@keyframes dg-line {
+  from {
+    transform: scaleX(0.2);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.dream-gate.is-paused *,
+.dream-gate.is-paused *::before,
+.dream-gate.is-paused *::after {
+  animation-play-state: paused !important;
+}
+
+@media (max-height: 560px) {
+  .dream-gate__scene {
+    transform: scale(0.7);
+    margin-top: -95px;
+    animation: none;
+  }
+
+  .dream-gate__copy {
+    top: calc(50% + 70px);
+  }
+
+  .dream-gate__line {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dream-gate,
+  .dream-gate *,
+  .dream-gate *::before,
+  .dream-gate *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .dream-gate__paper {
+    display: none;
+  }
+
+  .dream-gate__stars {
+    opacity: 0.8;
+  }
+}
+
+
+/* ---------- 启动失败面板 ---------- */
+/* 接口超时或失败时取代启动遮罩的可见状态：给出原因和重试入口，
+   不把用户留在「正在开启梦之门」上。 */
+
+.boot-error {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 32px 24px calc(32px + env(safe-area-inset-bottom, 0px));
+  background: var(--bg);
+  color: var(--text);
+  text-align: center;
+}
+
+.boot-error[hidden] {
+  display: none;
+}
+
+.boot-error-title {
+  margin: 0;
+  font-family: var(--article-font);
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+
+.boot-error-copy {
+  margin: 0;
+  max-width: 32em;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.boot-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+

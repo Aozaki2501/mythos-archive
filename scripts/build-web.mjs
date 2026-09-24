@@ -36,6 +36,10 @@ const apiClient = fs.readFileSync(
   "utf8",
 );
 const js = fs.readFileSync(path.join(ROOT, "viewer", "viewer.js"), "utf8");
+const dreamGateScript = fs.readFileSync(
+  path.join(ROOT, "viewer", "dream-gate.js"),
+  "utf8",
+);
 const witchScript = fs.readFileSync(WITCH_SCRIPT, "utf8");
 const offline = fs.readFileSync(
   path.join(ROOT, "dist", "幻梦境档案馆.html"),
@@ -202,6 +206,8 @@ function renderPrerenderPage(baseHtml, edition, work) {
     )
     .replace("</head>", `${socialMeta}</head>`)
     .replace('<body class="is-booting">', "<body>")
+    .replace(DREAM_GATE_MARKUP, "")
+    .replace(BOOT_ERROR_MARKUP, "")
     .replace(
       '<div class="layout" id="layout" aria-hidden="true">',
       '<div class="layout" id="layout">',
@@ -237,6 +243,57 @@ function writePrerenderPages(outputDir, payload, baseHtml) {
   return { files, bytes };
 }
 
+/* 梦门开场：结构放在 body 最前面，控制器紧随其后立即接管，
+   让开场在首帧就位，不先闪一下旧的启动转圈。
+   prerender 的深链接页面不带这一段，直接展示正文。 */
+const DREAM_GATE_MARKUP = `<section class="dream-gate" id="dream-gate" hidden role="dialog" aria-modal="true" aria-label="幻梦境开场" aria-labelledby="dream-gate-title">
+  <div class="dream-gate__sky" aria-hidden="true"></div>
+  <div class="dream-gate__stars" aria-hidden="true"></div>
+  <div class="dream-gate__scene" aria-hidden="true">
+    <div class="dream-gate__orbit"></div>
+    <div class="dream-gate__orbit dream-gate__orbit--two"></div>
+    <div class="dream-gate__arch">
+      <div class="dream-gate__moon"></div>
+      <div class="dream-gate__sea"></div>
+    </div>
+    <div class="dream-gate__step"></div>
+  </div>
+  <div class="dream-gate__copy">
+    <div class="dream-gate__eyebrow">BEYOND THE WAKING WORLD</div>
+    <h2 class="dream-gate__title" id="dream-gate-title">正在开启梦之门</h2>
+    <div class="dream-gate__sub">翻过此页，梦境有了回声</div>
+    <div class="dream-gate__line" aria-hidden="true"></div>
+  </div>
+  <div class="dream-gate__paper" aria-hidden="true"></div>
+  <div class="dream-gate__paper dream-gate__paper--right" aria-hidden="true"></div>
+  <div class="dream-gate__brand">幻梦境档案馆</div>
+  <button class="dream-gate__skip" type="button">跳过开场 →</button>
+</section>
+<script src="./dream-gate.js?v=${STATIC_VERSION}"></script>
+<script>
+/* 同一标签页只播放一次：后续刷新或跳转直接用静态启动态，
+   不必为了重复看动画拖慢正常导航。存储不可用时照常播放。 */
+(function () {
+  try {
+    if (sessionStorage.getItem("mythos.dreamGateShown")) return;
+    sessionStorage.setItem("mythos.dreamGateShown", "1");
+  } catch (error) {
+    /* 隐私模式等禁用存储的场景，直接播放一次 */
+  }
+  window.DreamGate && window.DreamGate.show({ maxWait: 12000 });
+})();
+</script>`;
+
+/* 启动失败面板：只挂在主入口。深链接的 prerender 页面正文是静态内容，
+   不依赖接口，遇到接口异常时走原来的登录门兜底，不需要这块全屏面板。 */
+const BOOT_ERROR_MARKUP = `<div class="boot-error" id="boot-error" hidden>
+  <h2 class="boot-error-title">暂时打不开档案馆</h2>
+  <p class="boot-error-copy" id="boot-error-copy"></p>
+  <div class="boot-error-actions">
+    <button type="button" class="btn" id="boot-error-retry">重试</button>
+    <button type="button" class="btn-ghost" id="boot-error-gate">仍要进入登录页</button>
+  </div>
+</div>`;
 const html = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -256,6 +313,7 @@ const html = `<!DOCTYPE html>
 <link rel="stylesheet" href="./viewer.css?v=${STATIC_VERSION}">
 </head>
 <body class="is-booting">
+${DREAM_GATE_MARKUP}
 <header class="site-bar" id="site-bar">
   <button type="button" class="site-brand" id="site-brand" aria-label="返回档案首页">
     <span class="site-brand-mark" aria-hidden="true"><img src="${BRAND_URL}" alt=""></span>
@@ -291,6 +349,7 @@ const html = `<!DOCTYPE html>
   <div class="boot-splash-title">正在开启梦之门…</div>
   <div class="boot-splash-sub">幻梦境档案馆</div>
 </div>
+${BOOT_ERROR_MARKUP}
 <div class="auth-gate" id="auth-gate" hidden></div>
 <div class="modal-root" id="modal-root" hidden></div>
 <div class="toast-root" id="toast-root" role="status" aria-live="polite" aria-atomic="true" hidden></div>
@@ -337,6 +396,7 @@ fs.mkdirSync(outDir, { recursive: true });
 fs.writeFileSync(path.join(outDir, "index.html"), html, "utf8");
 fs.writeFileSync(path.join(outDir, "viewer.css"), css, "utf8");
 fs.writeFileSync(path.join(outDir, "mythos-client.js"), apiClient, "utf8");
+fs.writeFileSync(path.join(outDir, "dream-gate.js"), dreamGateScript, "utf8");
 fs.writeFileSync(path.join(outDir, "witch-assistant.js"), witchScript, "utf8");
 fs.writeFileSync(path.join(outDir, "viewer.js"), js, "utf8");
 fs.writeFileSync(path.join(outDir, "archive-data.js"), dataScript, "utf8");
