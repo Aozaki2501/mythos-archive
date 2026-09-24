@@ -8,9 +8,34 @@ const ROOT = process.cwd();
 const CONTENT_DIR = path.join(ROOT, "content");
 const VIEWER_DIR = path.join(ROOT, "viewer");
 const BRAND_ASSET = path.join(VIEWER_DIR, "assets", "archive-brand.webp");
+const DISPLAY_FONT_ASSET = path.join(
+  VIEWER_DIR,
+  "assets",
+  "dreamland-display-serif.woff2",
+);
+const DISPLAY_FONT_LICENSE = path.join(
+  VIEWER_DIR,
+  "assets",
+  "SOURCE-HAN-SERIF-LICENSE.txt",
+);
+const DISPLAY_FONT_NOTICE = path.join(
+  VIEWER_DIR,
+  "assets",
+  "DREAMLAND-DISPLAY-FONT-NOTICE.txt",
+);
 const BRAND_URL = "./archive-brand.webp?v=20260921-brand";
 const OUT_FILE =
   process.env.OUT_FILE ?? path.join(ROOT, "dist", "幻梦境档案馆.html");
+const BUILD_DATE = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Hong_Kong",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+}).formatToParts(new Date()).reduce((parts, part) => {
+  if (part.type !== "literal") parts[part.type] = part.value;
+  return parts;
+}, {});
+const BUILD_DATE_LABEL = `${BUILD_DATE.year}.${BUILD_DATE.month}.${BUILD_DATE.day}`;
 
 marked.setOptions({ gfm: true, breaks: false });
 
@@ -100,13 +125,34 @@ function plainTextFromHtml(html) {
   );
 }
 
-function excerptFromHtml(html) {
-  const firstParagraph = String(html || "").match(
-    /<p(?:\s[^>]*)?>([\s\S]*?)<\/p>/i,
-  );
-  return plainTextFromHtml(firstParagraph ? firstParagraph[1] : html)
-    .replace(/\s+/g, " ")
-    .trim();
+const EXCERPT_LABEL_RE = new RegExp(
+  "^(" +
+    "#+.*" +
+    "|——.*——" +
+    "|[一二三四五六七八九十百壹贰叁肆伍陆柒捌玖拾]+([、.．].{0,10})?" +
+    "|第.{1,4}[章节幕场部卷].{0,10}" +
+    "|part\\s*\\d+.*" +
+    "|rating\\s*[:：].*" +
+    "|人物表|采风|游记|目录" +
+    ")$",
+  "i",
+);
+
+function excerptFromHtml(html, title) {
+  const paragraphs = [...String(html || "").matchAll(/<p(?:\s[^>]*)?>([\s\S]*?)<\/p>/gi)]
+    .map((match) => plainTextFromHtml(match[1]).replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  let text = "";
+  for (const paragraph of paragraphs) {
+    const isLabel =
+      paragraph === title ||
+      EXCERPT_LABEL_RE.test(paragraph) ||
+      (paragraph.length <= 8 && !/[。！？…”」』]$/.test(paragraph));
+    if (isLabel) continue;
+    text += (text ? " " : "") + paragraph;
+    if (text.length >= 90) break;
+  }
+  return text || paragraphs[0] || "";
 }
 
 function countWpsWordsFromHtml(html) {
@@ -133,16 +179,17 @@ function readEdition(slug) {
           const raw = fs.readFileSync(path.join(worksDir, name), "utf8");
           const { data, body } = parseFrontmatter(raw);
           const { html, sections } = renderBody(body);
+          const title = data.title || path.basename(name, ".md");
           return {
             slug: path.basename(name, ".md"),
             no: Number(data.no) || 0,
-            title: data.title || path.basename(name, ".md"),
+            title,
             author: data.author || "未见署名",
             authorStatus: data.authorStatus || "named",
             sourceFormat: data.sourceFormat || "markdown",
             authorQQ: String(data.authorQQ || data.author_qq || "").trim(),
             chars: countWpsWordsFromHtml(html),
-            excerpt: excerptFromHtml(html),
+            excerpt: data.excerpt || excerptFromHtml(html, title),
             sections,
             html,
           };
@@ -211,6 +258,31 @@ function copyBrandAsset(outputDir) {
   return { target, bytes: fs.statSync(target).size };
 }
 
+function copyDisplayFontAssets(outputDir) {
+  if (!fs.existsSync(DISPLAY_FONT_ASSET)) {
+    throw new Error(`缺少标题字体素材：${DISPLAY_FONT_ASSET}`);
+  }
+  if (!fs.existsSync(DISPLAY_FONT_LICENSE)) {
+    throw new Error(`缺少字体许可证：${DISPLAY_FONT_LICENSE}`);
+  }
+  if (!fs.existsSync(DISPLAY_FONT_NOTICE)) {
+    throw new Error(`缺少字体说明：${DISPLAY_FONT_NOTICE}`);
+  }
+  const targetDir = path.join(outputDir, "assets");
+  fs.mkdirSync(targetDir, { recursive: true });
+  const fontTarget = path.join(targetDir, path.basename(DISPLAY_FONT_ASSET));
+  const licenseTarget = path.join(targetDir, path.basename(DISPLAY_FONT_LICENSE));
+  const noticeTarget = path.join(targetDir, path.basename(DISPLAY_FONT_NOTICE));
+  fs.copyFileSync(DISPLAY_FONT_ASSET, fontTarget);
+  fs.copyFileSync(DISPLAY_FONT_LICENSE, licenseTarget);
+  fs.copyFileSync(DISPLAY_FONT_NOTICE, noticeTarget);
+  return {
+    fontBytes: fs.statSync(fontTarget).size,
+    licenseBytes: fs.statSync(licenseTarget).size,
+    noticeBytes: fs.statSync(noticeTarget).size,
+  };
+}
+
 // 自托管 API 需要知道当前构建包含哪些作品，避免把客户端目录直接当成可写配置。
 // 这是公开的作品编号清单，不包含正文、作者或评分数据。
 const catalogueManifest = {
@@ -245,11 +317,15 @@ const html = `<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/webp" href="${BRAND_URL}">
+<meta name="theme-color" content="#f5f4ef">
 <title>幻梦境档案馆</title>
 <meta name="description" content="幻梦境档案馆：文学期刊式的神话造物档案、阅读与评议空间。">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta name="mythos-build" content="2026-09-20-home-spotlight">
+<script>
+(function(){try{var t=localStorage.getItem("mythos.theme");if(!t&&window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)t="dark";var d=t==="dark";document.documentElement.dataset.theme=d?"dark":"light";var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute("content",d?"#11141b":"#f5f4ef");}catch(e){}})();
+</script>
 <style>
 ${css}
 </style>
@@ -269,17 +345,15 @@ ${css}
     <button type="button" data-nav="results" hidden>投票公示</button>
   </nav>
   <button type="button" class="site-account-link" id="site-account-link">调查员入口</button>
-</header>
 <div class="top-tools" id="top-tools">
   <button type="button" class="top-more" id="top-more" aria-controls="top-menu" aria-expanded="false" aria-label="更多操作">⋯</button>
   <div class="top-menu" id="top-menu">
-    <button type="button" class="top-global-search" id="top-global-search">全馆搜索</button>
     <button type="button" class="top-results" id="top-results" hidden>投票公示</button>
-    <button type="button" class="top-jump" id="top-jump" hidden>↓ 投票区</button>
     <div class="account-hud" id="account-hud" hidden></div>
     <button type="button" class="theme-toggle" id="theme-toggle" aria-label="切换到黑夜模式" title="切换到黑夜模式">☾ 黑夜</button>
   </div>
 </div>
+</header>
 <div class="boot-splash" id="boot-splash">
   <div class="boot-splash-dot" aria-hidden="true"></div>
   <div class="boot-splash-title">正在开启梦之门…</div>
@@ -315,6 +389,7 @@ ${css}
 </nav>
 
 <script>
+window.ARCHIVE_BUILD_DATE = ${JSON.stringify(BUILD_DATE_LABEL)};
 window.ARCHIVE_DATA = JSON.parse(${JSON.stringify(payload)});
 </script>
 <script>
@@ -328,6 +403,7 @@ fs.mkdirSync(path.dirname(OUT_FILE), { recursive: true });
 fs.writeFileSync(OUT_FILE, html, "utf8");
 const archiveAssets = copyArchiveAssets(path.dirname(OUT_FILE));
 const brandAsset = copyBrandAsset(path.dirname(OUT_FILE));
+const displayFontAssets = copyDisplayFontAssets(path.dirname(OUT_FILE));
 
 const totalWorks = editions.reduce((sum, e) => sum + e.works.length, 0);
 const withYinwen = editions
@@ -338,6 +414,7 @@ console.log(
   `archive assets=${archiveAssets.copiedFiles} files ${(archiveAssets.copiedBytes / 1024 / 1024).toFixed(2)} MB`,
 );
 console.log(`brand asset=${brandAsset.bytes} bytes`);
+console.log(`display font=${displayFontAssets.fontBytes} bytes`);
 console.log(
   `yinwen=${withYinwen.map((w) => w.no).join(",") || "none"}`,
 );

@@ -1,6 +1,6 @@
 /**
  * 幻梦境档案馆 · 自托管 Node.js + SQLite API 服务
- * 兼容原 CloudBase HTTP API 动作契约
+ * 保持现有 HTTP API 动作契约
  */
 const http = require("node:http");
 const crypto = require("node:crypto");
@@ -172,13 +172,6 @@ db.exec(`
     slugs TEXT NOT NULL
   );
 
-  CREATE TABLE IF NOT EXISTS likes (
-    id TEXT PRIMARY KEY,
-    workId TEXT NOT NULL,
-    qq TEXT NOT NULL,
-    t TEXT NOT NULL
-  );
-
   CREATE TABLE IF NOT EXISTS author_notes (
     workId TEXT PRIMARY KEY,
     body TEXT NOT NULL,
@@ -230,9 +223,6 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_comments_work_aggregate
     ON comments(workId, t);
-
-  CREATE INDEX IF NOT EXISTS idx_likes_work_aggregate
-    ON likes(workId, t);
 
   CREATE TABLE IF NOT EXISTS spotlight_daily (
     editionSlug TEXT NOT NULL,
@@ -1075,7 +1065,6 @@ function reportWorkStats(editionSlug) {
     WITH works AS (
       SELECT workId FROM ratings WHERE workId LIKE ?
       UNION SELECT workId FROM comments WHERE workId LIKE ?
-      UNION SELECT workId FROM likes WHERE workId LIKE ?
     ), ratings_by_work AS (
       SELECT workId, COUNT(*) AS ratingCount, AVG(chuanlu) AS chuanluAvg,
         AVG(dangan) AS danganAvg, AVG(overall) AS overallAvg,
@@ -1084,20 +1073,89 @@ function reportWorkStats(editionSlug) {
     ), comments_by_work AS (
       SELECT workId, COUNT(*) AS commentCount, MAX(COALESCE(editedAt, t)) AS lastCommentAt
       FROM comments WHERE workId LIKE ? GROUP BY workId
-    ), likes_by_work AS (
-      SELECT workId, COUNT(*) AS likeCount, MAX(t) AS lastLikeAt
-      FROM likes WHERE workId LIKE ? GROUP BY workId
     )
     SELECT works.workId, COALESCE(r.ratingCount, 0) AS ratingCount,
       r.chuanluAvg, r.danganAvg, r.overallAvg, r.totalAvg,
-      COALESCE(c.commentCount, 0) AS commentCount, COALESCE(l.likeCount, 0) AS likeCount,
-      MAX(COALESCE(r.lastRatingAt, ''), COALESCE(c.lastCommentAt, ''), COALESCE(l.lastLikeAt, '')) AS lastActivityAt
+      COALESCE(c.commentCount, 0) AS commentCount,
+      MAX(COALESCE(r.lastRatingAt, ''), COALESCE(c.lastCommentAt, '')) AS lastActivityAt
     FROM works
     LEFT JOIN ratings_by_work r ON r.workId = works.workId
     LEFT JOIN comments_by_work c ON c.workId = works.workId
-    LEFT JOIN likes_by_work l ON l.workId = works.workId
     ORDER BY works.workId ASC
-  `).all(prefix, prefix, prefix, prefix, prefix, prefix);
+  `).all(prefix, prefix, prefix, prefix);
+}
+
+// 搜索面板的“馆内热议”：投票为主、评论为辅，新互动权重更高，最多 4 条，同届最多 2 条。
+const SEARCH_RECOMMENDATION_LIMIT = 4;
+const SEARCH_RECOMMENDATION_MAX_PER_EDITION = 2;
+const SEARCH_RECOMMENDATION_MIN_ACTIVITY = 2;
+
+function searchRecommendations() {
+  // 互动按时间分档加权：最近 7 天记满权重，8-30 天打折，更早的只保留少量权重。
+  const rows = db.prepare(`
+    WITH works AS (
+      SELECT workId FROM ratings UNION SELECT workId FROM comments
+    ), rating_activity AS (
+      SELECT workId, COUNT(*) AS ratingCount,
+        SUM(CASE
+          WHEN datetime(t) >= datetime('now', '-7 days') THEN 1.0
+          WHEN datetime(t) >= datetime('now', '-30 days') THEN 0.6
+          ELSE 0.3
+        END) AS ratingWeight
+      FROM ratings GROUP BY workId
+    ), comment_activity AS (
+      SELECT workId, COUNT(*) AS commentCount,
+        SUM(CASE
+          WHEN datetime(COALESCE(editedAt, t)) >= datetime('now', '-7 days') THEN 1.0
+          WHEN datetime(COALESCE(editedAt, t)) >= datetime('now', '-30 days') THEN 0.6
+          ELSE 0.3
+        END) AS commentWeight
+      FROM comments GROUP BY workId
+    )
+    SELECT works.workId AS workId,
+      COALESCE(r.ratingCount, 0) AS ratingCount,
+      COALESCE(c.commentCount, 0) AS commentCount,
+      COALESCE(r.ratingWeight, 0) AS ratingWeight,
+      COALESCE(c.commentWeight, 0) AS commentWeight
+    FROM works
+    LEFT JOIN rating_activity r ON r.workId = works.workId
+    LEFT JOIN comment_activity c ON c.workId = works.workId
+  `).all();
+  const candidates = rows
+    .filter((row) => /^[A-Za-z0-9_-]{1,64}\//.test(String(row.workId || "")))
+    .map((row) => {
+      const ratingCount = Number(row.ratingCount) || 0;
+      const commentCount = Number(row.commentCount) || 0;
+      const ratingWeight = Number(row.ratingWeight) || 0;
+      const commentWeight = Number(row.commentWeight) || 0;
+      return {
+        workId: row.workId,
+        ratingCount,
+        commentCount,
+        activity: ratingCount + commentCount,
+        // 投票权重 3、评论权重 1；对数压缩避免单篇长期占满入口。
+        score: Math.log1p(ratingWeight) * 3 + Math.log1p(commentWeight),
+      };
+    })
+    .filter((row) => row.activity >= SEARCH_RECOMMENDATION_MIN_ACTIVITY);
+  candidates.sort((a, b) =>
+    b.score - a.score ||
+    b.ratingCount - a.ratingCount ||
+    a.workId.localeCompare(b.workId),
+  );
+  const editionCounts = new Map();
+  const picked = candidates.filter((row) => {
+    const slug = row.workId.split("/")[0];
+    const count = editionCounts.get(slug) || 0;
+    if (count >= SEARCH_RECOMMENDATION_MAX_PER_EDITION) return false;
+    editionCounts.set(slug, count + 1);
+    return true;
+  }).slice(0, SEARCH_RECOMMENDATION_LIMIT);
+  for (const row of candidates) {
+    if (picked.length >= SEARCH_RECOMMENDATION_LIMIT) break;
+    if (!picked.includes(row)) picked.push(row);
+  }
+  return picked.map(({ score, activity, ratingWeight, commentWeight, ...row }) => row);
 }
 
 function editionLeaderboard(editionSlug) {
@@ -1114,6 +1172,32 @@ function editionLeaderboard(editionSlug) {
       ratingCount: row.ratingCount,
       totalAvg: row.totalAvg,
     }));
+}
+
+function editionScoreDistributions(editionSlug) {
+  const dimensions = ["chuanlu", "dangan", "overall"];
+  const selections = dimensions.flatMap((dimension) =>
+    [1, 2, 3, 4, 5].map(
+      (score) => `SUM(CASE WHEN ${dimension} = ${score} THEN 1 ELSE 0 END) AS ${dimension}${score}`,
+    ),
+  );
+  const rows = db.prepare(`
+    SELECT workId, COUNT(*) AS ratingCount, ${selections.join(", ")}
+    FROM ratings
+    WHERE workId LIKE ?
+    GROUP BY workId
+  `).all(editionSlug + "/%");
+  const distributions = {};
+  rows.forEach((row) => {
+    distributions[row.workId] = {
+      ratingCount: Number(row.ratingCount) || 0,
+      ...Object.fromEntries(dimensions.map((dimension) => [
+        dimension,
+        [1, 2, 3, 4, 5].map((score) => Number(row[dimension + score]) || 0),
+      ])),
+    };
+  });
+  return distributions;
 }
 
 function emptyAwardConfig() {
@@ -1148,7 +1232,6 @@ function reportSummary() {
     enabledUsers: Number(db.prepare("SELECT COUNT(*) AS c FROM users WHERE enabled = 1").get().c),
     ratings: Number(db.prepare("SELECT COUNT(*) AS c FROM ratings").get().c),
     comments: Number(db.prepare("SELECT COUNT(*) AS c FROM comments").get().c),
-    likes: Number(db.prepare("SELECT COUNT(*) AS c FROM likes").get().c),
   };
 }
 
@@ -1161,6 +1244,9 @@ async function handle(action, payload, auth, ctx) {
   switch (action) {
     case "ping":
       return { ok: true, time: new Date().toISOString() };
+
+    case "getSearchRecommendations":
+      return { works: searchRecommendations() };
 
     case "bootstrap": {
       const visibleAuthorBindings = {};
@@ -1219,13 +1305,13 @@ async function handle(action, payload, auth, ctx) {
       const heat = workStats.map((row) => ({
         workId: row.workId,
         commentCount: row.commentCount,
-        likeCount: row.likeCount,
         lastActivityAt: row.lastActivityAt,
       }));
       return {
         rankingsAvailable,
         heat,
         leaderboard: rankingsAvailable ? editionLeaderboard(editionSlug) : [],
+        distributions: rankingsAvailable ? editionScoreDistributions(editionSlug) : null,
       };
     }
 
@@ -1510,14 +1596,6 @@ async function handle(action, payload, auth, ctx) {
         };
       });
 
-      // 点赞
-      const rawLikes = db.prepare("SELECT qq FROM likes WHERE workId = ? LIMIT 1000").all(workId);
-      const likes = {};
-      rawLikes.forEach((row, index) => {
-        const key = user && row.qq === user.qq ? user.qq : "liked-" + (index + 1);
-        likes[key] = true;
-      });
-
       // 作者附言
       const noteRow = db.prepare("SELECT body, qq, updatedAt FROM author_notes WHERE workId = ?").get(workId);
       const authorNote = noteRow
@@ -1544,7 +1622,6 @@ async function handle(action, payload, auth, ctx) {
       return {
         ratings,
         comments,
-        likes,
         authorNote,
         content,
       };
@@ -1695,31 +1772,6 @@ async function handle(action, payload, auth, ctx) {
         achievementNoticePending,
         unlockedAchievement,
       };
-    }
-
-    case "toggleLike": {
-      if (!user || (session.role !== "member" && session.role !== "admin")) {
-        throw new Error("无权点赞");
-      }
-      const workId = String(payload.workId || "");
-      const editionSlug = workId.split("/")[0];
-      const st = editionState(settings, editionSlug);
-      if (st.phase !== "统计" && st.phase !== "公示") {
-        throw new Error("当前阶段不可点赞");
-      }
-      const id = workId + "::" + user.qq;
-      const existing = db.prepare("SELECT id FROM likes WHERE id = ?").get(id);
-      if (existing) {
-        db.prepare("DELETE FROM likes WHERE id = ?").run(id);
-        return { liked: false };
-      }
-      db.prepare("INSERT INTO likes (id, workId, qq, t) VALUES (?, ?, ?, ?)").run(
-        id,
-        workId,
-        user.qq,
-        new Date().toISOString()
-      );
-      return { liked: true };
     }
 
     case "addComment": {
@@ -1938,7 +1990,6 @@ async function handle(action, payload, auth, ctx) {
       const editionSlugs = db.prepare(`
         SELECT DISTINCT substr(workId, 1, instr(workId, '/') - 1) AS slug FROM ratings
         UNION SELECT DISTINCT substr(workId, 1, instr(workId, '/') - 1) AS slug FROM comments
-        UNION SELECT DISTINCT substr(workId, 1, instr(workId, '/') - 1) AS slug FROM likes
       `).all().map((row) => row.slug).filter(Boolean);
       const workStats = editionSlugs.flatMap((slug) => reportWorkStats(slug));
       return { summary: reportSummary(), users, ratings, comments, workStats };

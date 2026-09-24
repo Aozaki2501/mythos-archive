@@ -30,6 +30,7 @@ const mimeTypes = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".webp": "image/webp",
+  ".woff2": "font/woff2",
   ".wmf": "image/wmf",
   ".emf": "image/emf",
   ".ico": "image/x-icon",

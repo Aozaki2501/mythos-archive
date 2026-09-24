@@ -1,11 +1,10 @@
-// 构建云端静态站到 dist/web/
+// 构建自托管静态站到 dist/web/
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 const ROOT = process.cwd();
-const ENV_ID = process.env.CLOUDBASE_ENV || "";
-const API_URL = process.env.CLOUDBASE_API_URL || "";
+const API_URL = process.env.ARCHIVE_API_URL || "/api";
 const BRAND_ASSET = path.join(ROOT, "viewer", "assets", "archive-brand.webp");
 const WITCH_SCRIPT = path.join(ROOT, "viewer", "witch-assistant.js");
 const WITCH_DESKTOP_ASSET = path.join(
@@ -21,15 +20,9 @@ const WITCH_CUBE_ASSET = path.join(
   "witch-cube-v1.webp",
 );
 const BRAND_URL = "./archive-brand.webp?v=20260921-brand";
-const STATIC_VERSION = "20260923-public-results-entry-v1";
+const STATIC_VERSION = "20260924-context-v28";
+const BUILD_DATE = STATIC_VERSION.slice(0, 8).replace(/^(\d{4})(\d{2})(\d{2})$/, "$1.$2.$3");
 const PUBLIC_ORIGIN = String(process.env.ARCHIVE_PUBLIC_ORIGIN || "").replace(/\/+$/, "");
-if (!ENV_ID || !API_URL) {
-  console.error(
-    "请先设置环境变量 CLOUDBASE_ENV 与 CLOUDBASE_API_URL 后再构建。详见《部署说明书》。",
-  );
-  process.exit(1);
-}
-
 const built = spawnSync(process.execPath, ["scripts/build-html.mjs"], {
   cwd: ROOT,
   stdio: "inherit",
@@ -37,16 +30,9 @@ const built = spawnSync(process.execPath, ["scripts/build-html.mjs"], {
 });
 if (built.status !== 0) process.exit(built.status || 1);
 
-// 确保浏览器 SDK 包存在
-const vendorSrc = path.join(ROOT, "viewer", "vendor", "cloudbase.iife.js");
-if (!fs.existsSync(vendorSrc)) {
-  console.error("缺少 viewer/vendor/cloudbase.iife.js，请先打包 SDK");
-  process.exit(1);
-}
-
 const css = fs.readFileSync(path.join(ROOT, "viewer", "viewer.css"), "utf8");
-const cloudClient = fs.readFileSync(
-  path.join(ROOT, "viewer", "cloud-client.js"),
+const apiClient = fs.readFileSync(
+  path.join(ROOT, "viewer", "mythos-client.js"),
   "utf8",
 );
 const js = fs.readFileSync(path.join(ROOT, "viewer", "viewer.js"), "utf8");
@@ -82,7 +68,7 @@ const webPayload = JSON.stringify(webPayloadObject)
   .replace(/</g, "\\u003c")
   .replace(/\u2028/g, "\\u2028")
   .replace(/\u2029/g, "\\u2029");
-const dataScript = `window.ARCHIVE_STATIC_VERSION = ${JSON.stringify(STATIC_VERSION)};\nwindow.ARCHIVE_DATA = JSON.parse(${JSON.stringify(webPayload)});\n`;
+const dataScript = `window.ARCHIVE_STATIC_VERSION = ${JSON.stringify(STATIC_VERSION)};\nwindow.ARCHIVE_BUILD_DATE = ${JSON.stringify(BUILD_DATE)};\nwindow.ARCHIVE_PUBLIC_ORIGIN = ${JSON.stringify(PUBLIC_ORIGIN)};\nwindow.ARCHIVE_DATA = JSON.parse(${JSON.stringify(webPayload)});\n`;
 
 function writeArchiveContent(outputDir, payload) {
   const root = path.join(outputDir, "archive-content");
@@ -145,6 +131,17 @@ function renderPrerenderArticle(edition, work) {
       : "作者身份将在结果公示时按获奖范围解封"
     : "";
   const editionLink = `/#/${encodeURIComponent(edition.slug)}`;
+  const volumeNumber = Number(edition.year) - 2021;
+  const volumeNames = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
+  const volumeLabel = volumeNames[volumeNumber]
+    ? `第${volumeNames[volumeNumber]}卷`
+    : `${edition.year} 卷`;
+  const category = String(edition.shortName || edition.name || "")
+    .replace(/^\d+\s*/, "")
+    .replace(/设计大赛$/, "");
+  const chars = Number(work.chars) || 0;
+  const minutes = chars ? Math.max(1, Math.ceil(chars / 400)) : 0;
+  const sectionCount = Array.isArray(work.sections) ? work.sections.length : 0;
 
   return `<div class="reader-frame prerender-reader">
   <div class="sheet">
@@ -154,14 +151,25 @@ function renderPrerenderArticle(edition, work) {
         <span>·</span>
         <a href="${editionLink}">返回本卷</a>
       </nav>
-      <p class="work-fileno"><span class="work-fileno-vol">${escapeHtml(edition.year)} 卷</span><span class="work-fileno-slash">/</span><span class="work-fileno-no">${escapeHtml(displayWorkNo(work))}</span></p>
-      <h1 class="work-title">${escapeHtml(work.title)}</h1>
-      <p class="work-meta"><span class="work-meta-author">${escapeHtml(author)}</span><span class="work-meta-sep">·</span><span class="work-meta-chars">约 ${escapeHtml(work.chars)} 字</span></p>
-      ${authorNote ? `<p class="work-anon-note">${escapeHtml(authorNote)}</p>` : ""}
-      <p class="work-provenance"><span class="work-provenance-edition">${escapeHtml(edition.shortName)}</span><span class="work-provenance-sep">·</span><span class="work-provenance-phase">${escapeHtml(status)}</span></p>
-      ${excerpt ? `<p class="prerender-excerpt"><strong>首段：</strong>${escapeHtml(excerpt)}</p>` : ""}
+      <div class="work-card">
+        <div class="work-card-top"><span class="work-card-label">幻梦境档案馆 · 馆藏卡</span><span class="work-card-number">No. ${escapeHtml(edition.year)} / ${escapeHtml(displayWorkNo(work))}</span></div>
+        <div class="work-card-body">
+          <p class="work-fileno"><span class="work-fileno-vol">${escapeHtml(volumeLabel)}</span><span class="work-fileno-slash">·</span><span class="work-fileno-no">${escapeHtml(category)}</span></p>
+          <h1 class="work-title">${escapeHtml(work.title)}</h1>
+          <div class="work-card-fields">
+            <div class="work-card-field"><span class="work-card-field-label">篇幅</span><strong class="work-card-field-value">${escapeHtml(chars)} 字${minutes ? ` · 约 ${minutes} 分钟` : ""}</strong></div>
+            <div class="work-card-field"><span class="work-card-field-label">阶段</span><strong class="work-card-field-value">${escapeHtml(status)}</strong></div>
+            <div class="work-card-field${anonymous ? " is-anonymous" : ""}"><span class="work-card-field-label">作者</span><strong class="work-card-field-value">${escapeHtml(anonymous ? "匿名" : author)}</strong></div>
+            <div class="work-card-field"><span class="work-card-field-label">章节</span><strong class="work-card-field-value">${sectionCount ? `${sectionCount} 节` : "正文"}</strong></div>
+          </div>
+          ${authorNote ? `<p class="work-anon-note">${escapeHtml(authorNote)}</p>` : ""}
+          ${excerpt ? `<p class="prerender-excerpt"><strong>首段：</strong>${escapeHtml(excerpt)}</p>` : ""}
+        </div>
+        <span class="work-card-hole" aria-hidden="true"></span>
+      </div>
     </header>
-    <div class="work-body">${work.html || "<p>正文暂未发布。</p>"}</div>
+    <div class="work-body${edition.slug === "2026" && Number(work.no) === 34 ? " work-no-indent" : ""}">${work.html || "<p>正文暂未发布。</p>"}</div>
+    <div class="work-end-mark" role="separator"><div class="work-end-ornament" aria-hidden="true"><span>✦</span><span>✦</span><span>✦</span></div><div class="work-end-title">本篇完</div><p class="work-end-meta">${escapeHtml(edition.shortName)} · 档号 ${escapeHtml(displayWorkNo(work))} · ${escapeHtml(chars)} 字</p><p class="work-end-prompt">读完了？在下方留下你的评论 ↓</p></div>
   </div>
 </div>`;
 }
@@ -203,8 +211,8 @@ function renderPrerenderPage(baseHtml, edition, work) {
       `<main class="content" id="content">${renderPrerenderArticle(edition, work)}</main>`,
     )
     .replace(
-      `<script src="./cloud-client.js?v=${STATIC_VERSION}">`,
-      `<script>window.ARCHIVE_INITIAL_ROUTE = ${JSON.stringify(route)};</script>\n<script src="./cloud-client.js?v=${STATIC_VERSION}">`,
+      `<script src="./mythos-client.js?v=${STATIC_VERSION}">`,
+      `<script>window.ARCHIVE_INITIAL_ROUTE = ${JSON.stringify(route)};</script>\n<script src="./mythos-client.js?v=${STATIC_VERSION}">`,
     )
     .replaceAll('href="./', 'href="/')
     .replaceAll('src="./', 'src="/');
@@ -235,6 +243,7 @@ const html = `<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/webp" href="${BRAND_URL}">
+<meta name="theme-color" content="#f5f4ef">
 <title>幻梦境档案馆</title>
 <meta name="description" content="幻梦境档案馆：文学期刊式的神话造物档案、阅读与评议空间。">
 <meta name="color-scheme" content="light dark">
@@ -242,7 +251,7 @@ const html = `<!DOCTYPE html>
 <meta http-equiv="Pragma" content="no-cache">
 <meta name="mythos-build" content="2026-09-20-home-spotlight">
 <script>
-(function(){try{var t=localStorage.getItem("mythos.theme");if(!t&&window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)t="dark";document.documentElement.dataset.theme=t==="dark"?"dark":"light";}catch(e){}})();
+(function(){try{var t=localStorage.getItem("mythos.theme");if(!t&&window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)t="dark";var d=t==="dark";document.documentElement.dataset.theme=d?"dark":"light";var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute("content",d?"#11141b":"#f5f4ef");}catch(e){}})();
 </script>
 <link rel="stylesheet" href="./viewer.css?v=${STATIC_VERSION}">
 </head>
@@ -257,21 +266,26 @@ const html = `<!DOCTYPE html>
     <button type="button" data-nav="catalogue">本届目录</button>
     <button type="button" data-nav="archive">历届档案</button>
     <button type="button" data-nav="guide">评议说明</button>
-    <button type="button" data-nav="search">全馆搜索</button>
     <button type="button" data-nav="results" hidden>投票公示</button>
   </nav>
+  <div class="site-search" id="site-search">
+    <div class="site-search-box">
+      <span class="site-search-icon" aria-hidden="true">⌕</span>
+      <input class="site-search-input" id="site-search-input" type="search" placeholder="搜索档案、作者或编号" aria-label="全馆搜索" autocomplete="off">
+      <span class="site-search-key" aria-hidden="true">/</span>
+    </div>
+    <div class="site-search-panel" id="site-search-panel" hidden></div>
+  </div>
   <button type="button" class="site-account-link" id="site-account-link">调查员入口</button>
-</header>
 <div class="top-tools" id="top-tools">
   <button type="button" class="top-more" id="top-more" aria-controls="top-menu" aria-expanded="false" aria-label="更多操作">⋯</button>
   <div class="top-menu" id="top-menu">
-    <button type="button" class="top-global-search" id="top-global-search">全馆搜索</button>
     <button type="button" class="top-results" id="top-results" hidden>投票公示</button>
-    <button type="button" class="top-jump" id="top-jump" hidden>↓ 投票区</button>
     <div class="account-hud" id="account-hud" hidden></div>
     <button type="button" class="theme-toggle" id="theme-toggle" aria-label="切换到黑夜模式" title="切换到黑夜模式">☾ 黑夜</button>
   </div>
 </div>
+</header>
 <div class="boot-splash" id="boot-splash">
   <div class="boot-splash-dot" aria-hidden="true"></div>
   <div class="boot-splash-title">正在开启梦之门…</div>
@@ -306,15 +320,11 @@ const html = `<!DOCTYPE html>
   <button class="mobile-bar-btn mobile-bar-next" id="mobile-bar-next" type="button" aria-label="下一篇" disabled>下一篇 ›</button>
 </nav>
 
-<script src="./cloudbase.iife.js"></script>
 <script>
-window.ARCHIVE_CLOUD = {
-  envId: ${JSON.stringify(ENV_ID)},
-  apiUrl: ${JSON.stringify(API_URL)}
-};
+window.ARCHIVE_API_URL = ${JSON.stringify(API_URL)};
 </script>
 <script src="./archive-data.js?v=${STATIC_VERSION}"></script>
-<script src="./cloud-client.js?v=${STATIC_VERSION}"></script>
+<script src="./mythos-client.js?v=${STATIC_VERSION}"></script>
 <script src="./witch-assistant.js?v=${STATIC_VERSION}"></script>
 <script src="./viewer.js?v=${STATIC_VERSION}"></script>
 </body>
@@ -322,16 +332,16 @@ window.ARCHIVE_CLOUD = {
 `;
 
 const outDir = path.join(ROOT, "dist", "web");
+fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(outDir, { recursive: true });
 fs.writeFileSync(path.join(outDir, "index.html"), html, "utf8");
 fs.writeFileSync(path.join(outDir, "viewer.css"), css, "utf8");
-fs.writeFileSync(path.join(outDir, "cloud-client.js"), cloudClient, "utf8");
+fs.writeFileSync(path.join(outDir, "mythos-client.js"), apiClient, "utf8");
 fs.writeFileSync(path.join(outDir, "witch-assistant.js"), witchScript, "utf8");
 fs.writeFileSync(path.join(outDir, "viewer.js"), js, "utf8");
 fs.writeFileSync(path.join(outDir, "archive-data.js"), dataScript, "utf8");
 const archiveContent = writeArchiveContent(outDir, fullPayload);
 const prerenderPages = writePrerenderPages(outDir, fullPayload, html);
-fs.copyFileSync(vendorSrc, path.join(outDir, "cloudbase.iife.js"));
 const archiveAssets = path.join(ROOT, "dist", "archive-assets");
 if (fs.existsSync(archiveAssets)) {
   fs.cpSync(archiveAssets, path.join(outDir, "archive-assets"), { recursive: true });
@@ -346,6 +356,15 @@ if (!fs.existsSync(WITCH_CUBE_ASSET)) {
 }
 const witchAssetDir = path.join(outDir, "assets");
 fs.mkdirSync(witchAssetDir, { recursive: true });
+for (const assetName of [
+  "dreamland-display-serif.woff2",
+  "SOURCE-HAN-SERIF-LICENSE.txt",
+  "DREAMLAND-DISPLAY-FONT-NOTICE.txt",
+]) {
+  const source = path.join(ROOT, "viewer", "assets", assetName);
+  if (!fs.existsSync(source)) throw new Error(`缺少素材：${source}`);
+  fs.copyFileSync(source, path.join(witchAssetDir, assetName));
+}
 fs.copyFileSync(
   WITCH_DESKTOP_ASSET,
   path.join(witchAssetDir, "witch-desktop-v2.webp"),
@@ -356,7 +375,6 @@ fs.copyFileSync(
 );
 fs.rmSync(path.join(outDir, "archive-brand.png"), { force: true });
 console.log("web out=", path.join(outDir, "index.html"));
-console.log("envId=", ENV_ID);
 console.log("apiUrl=", API_URL);
 console.log(
   "catalogue payload=",

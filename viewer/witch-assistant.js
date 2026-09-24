@@ -666,8 +666,11 @@
   }
 
   function invokeSearch() {
-    var button = document.getElementById("top-global-search");
-    if (button) button.click();
+    var input = document.getElementById("site-search-input");
+    if (input) {
+      input.focus();
+      return;
+    }
   }
 
   function toggleCharacter() {
