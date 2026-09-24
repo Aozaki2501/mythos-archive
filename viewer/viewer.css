@@ -8007,6 +8007,15 @@ html:not(.is-archive) :is(
   transition: opacity 360ms ease;
   isolation: isolate;
   contain: layout paint;
+  /* 开场没有可见按钮：点画面任意位置或按 Esc 跳过，指针形状给出提示。 */
+  cursor: pointer;
+}
+
+/* 只给读屏软件的开场说明；视觉上由整屏画面承担。
+   焦点落在遮罩本身，给整屏描边会很怪，所以不画外框。 */
+.dream-gate:focus,
+.dream-gate:focus-visible {
+  outline: none;
 }
 
 .dream-gate[hidden] {
@@ -8212,23 +8221,16 @@ html.is-dream-gate .boot-splash {
   animation: dg-copy 0.75s ease both;
 }
 
-.dream-gate__skip {
+.dream-gate__hint {
   position: absolute;
-  right: 24px;
-  bottom: max(24px, env(safe-area-inset-bottom));
-  padding: 7px 13px;
-  background: transparent;
-  border: 1px solid var(--dg-line);
-  border-radius: var(--radius);
-  color: var(--dg-text);
-  font-size: 12px;
-  letter-spacing: 0.1em;
-}
-
-.dream-gate__skip:hover,
-.dream-gate__skip:focus-visible {
-  border-color: var(--dg-seal);
-  color: #ffffff;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
 }
 
 .dream-gate__paper {

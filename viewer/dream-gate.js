@@ -10,7 +10,9 @@
   var gate = document.getElementById("dream-gate");
   if (!gate) return;
 
-  var skipButton = gate.querySelector(".dream-gate__skip");
+  /* 开场没有可见按钮：点画面任意位置、按 Esc / 回车 / 空格都能跳过，
+     焦点始终留在遮罩本身，键盘不会走进被遮住的页面。 */
+
   /* 开门动作的最短可见时间。本站实测启动只需 0.3 秒左右，立刻退场只会看到
      半开的纸页一闪而过，比原来的转圈更突兀；这里只等开门动作走完，
      不等接口、不阻止页面就绪、也不改变任何登录或数据状态。 */
@@ -81,8 +83,16 @@
   function guardFocus(event) {
     if (closing) return;
     if (gate.contains(event.target)) return;
-    var target = skipButton || gate;
-    if (typeof target.focus === "function") target.focus({ preventScroll: true });
+    focusGate();
+  }
+
+  function focusGate() {
+    if (typeof gate.focus !== "function") return;
+    try {
+      gate.focus({ preventScroll: true });
+    } catch (error) {
+      gate.focus();
+    }
   }
 
   function show(options) {
@@ -104,13 +114,7 @@
     watchChildren();
     gate.classList.toggle("is-paused", document.hidden === true);
     if (!supportsInert) document.addEventListener("focusin", guardFocus, true);
-    if (skipButton && typeof skipButton.focus === "function") {
-      try {
-        skipButton.focus({ preventScroll: true });
-      } catch (error) {
-        skipButton.focus();
-      }
-    }
+    focusGate();
     clearTimeout(maxWaitTimer);
     var maxWait = Number(options && options.maxWait);
     maxWaitTimer = setTimeout(function () {
@@ -159,19 +163,23 @@
 
   function onKeydown(event) {
     if (closing) return;
-    if (event.key === "Escape") {
+    if (
+      event.key === "Escape" ||
+      event.key === "Enter" ||
+      event.key === " " ||
+      event.key === "Spacebar"
+    ) {
       event.preventDefault();
       hide("skip");
       return;
     }
     if (event.key !== "Tab") return;
-    /* 单按钮模态层：焦点留在跳过按钮上。 */
+    /* 没有可聚焦控件，Tab 一律留在遮罩上。 */
     event.preventDefault();
-    var target = skipButton || gate;
-    if (typeof target.focus === "function") target.focus({ preventScroll: true });
+    focusGate();
   }
 
-  if (skipButton) skipButton.addEventListener("click", onSkip);
+  gate.addEventListener("click", onSkip);
   gate.addEventListener("keydown", onKeydown);
   document.addEventListener("visibilitychange", function () {
     if (closing) return;

@@ -246,7 +246,7 @@ function writePrerenderPages(outputDir, payload, baseHtml) {
 /* 梦门开场：结构放在 body 最前面，控制器紧随其后立即接管，
    让开场在首帧就位，不先闪一下旧的启动转圈。
    prerender 的深链接页面不带这一段，直接展示正文。 */
-const DREAM_GATE_MARKUP = `<section class="dream-gate" id="dream-gate" hidden role="dialog" aria-modal="true" aria-label="幻梦境开场" aria-labelledby="dream-gate-title">
+const DREAM_GATE_MARKUP = `<section class="dream-gate" id="dream-gate" hidden tabindex="-1" role="dialog" aria-modal="true" aria-label="幻梦境开场" aria-labelledby="dream-gate-title">
   <div class="dream-gate__sky" aria-hidden="true"></div>
   <div class="dream-gate__stars" aria-hidden="true"></div>
   <div class="dream-gate__scene" aria-hidden="true">
@@ -267,7 +267,7 @@ const DREAM_GATE_MARKUP = `<section class="dream-gate" id="dream-gate" hidden ro
   <div class="dream-gate__paper" aria-hidden="true"></div>
   <div class="dream-gate__paper dream-gate__paper--right" aria-hidden="true"></div>
   <div class="dream-gate__brand">幻梦境档案馆</div>
-  <button class="dream-gate__skip" type="button">跳过开场 →</button>
+  <p class="dream-gate__hint">点击任意位置或按 Esc 跳过开场</p>
 </section>
 <script src="./dream-gate.js?v=${STATIC_VERSION}"></script>
 <script>
