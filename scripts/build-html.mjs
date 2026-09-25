@@ -169,6 +169,54 @@ function countWpsWordsFromHtml(html) {
   return han.length + words.length;
 }
 
+function readPublicationData(slug, filename, field) {
+  const file = path.join(CONTENT_DIR, slug, filename);
+  if (!fs.existsSync(file)) return null;
+  const data = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (
+    data.schemaVersion !== 1 ||
+    String(data.edition) !== slug ||
+    !Array.isArray(data[field])
+  ) {
+    throw new Error(`公示数据格式错误：${file}`);
+  }
+  return data;
+}
+
+function validatePublicationLinks(slug, works, results, reviews) {
+  const knownWorks = new Set(works.map((work) => work.slug));
+  const rankedWorks = new Set();
+  if (results && (!Number.isInteger(results.authorRevealRankLimit) || results.authorRevealRankLimit < 0)) {
+    throw new Error(`作者公开名次上限无效：${slug}`);
+  }
+  for (const row of results?.rankings || []) {
+    if (!knownWorks.has(row.workSlug) || rankedWorks.has(row.workSlug) || !Number.isInteger(row.rank) || row.rank < 1) {
+      throw new Error(`公示排名与作品不匹配：${slug} / ${row.title || row.workSlug}`);
+    }
+    if (row.rank > results.authorRevealRankLimit && !row.award && row.author !== "匿名") {
+      throw new Error(`超出公开名次的作者未匿名：${slug} / ${row.title || row.workSlug}`);
+    }
+    rankedWorks.add(row.workSlug);
+  }
+  for (const review of reviews?.reviews || []) {
+    if (!knownWorks.has(review.workSlug) || !String(review.body || "").trim()) {
+      throw new Error(`公示评语与作品不匹配：${slug} / ${review.workTitle || review.workSlug}`);
+    }
+  }
+}
+
+function applyPublicationAuthors(works, results) {
+  if (!results) return;
+  const rankingByWork = new Map(results.rankings.map((row) => [row.workSlug, row]));
+  for (const work of works) {
+    const publishedAuthor = rankingByWork.get(work.slug)?.author || "匿名";
+    const anonymous = publishedAuthor === "匿名" || publishedAuthor === "未见署名";
+    work.author = anonymous ? "匿名" : publishedAuthor;
+    work.authorStatus = anonymous ? "anonymous" : "named";
+    if (anonymous) work.authorQQ = "";
+  }
+}
+
 function readEdition(slug) {
   const metaPath = path.join(CONTENT_DIR, slug, "edition.json");
   const meta = fs.existsSync(metaPath)
@@ -202,6 +250,11 @@ function readEdition(slug) {
         .sort((a, b) => a.no - b.no)
     : [];
 
+  const results = readPublicationData(slug, "results.json", "rankings");
+  const reviews = readPublicationData(slug, "reviews.json", "reviews");
+  validatePublicationLinks(slug, works, results, reviews);
+  applyPublicationAuthors(works, results);
+
   return {
     slug,
     year: meta.year ?? Number(slug) ?? 0,
@@ -212,6 +265,8 @@ function readEdition(slug) {
     note: meta.note ?? "",
     sourceFormat: meta.sourceFormat ?? "",
     sourceFolder: meta.sourceFolder ?? "",
+    results,
+    reviews,
     works,
   };
 }

@@ -20,7 +20,7 @@ const WITCH_CUBE_ASSET = path.join(
   "witch-cube-v1.webp",
 );
 const BRAND_URL = "./archive-brand.webp?v=20260921-brand";
-const STATIC_VERSION = "20260925-reply-preview-report-filters-v30";
+const STATIC_VERSION = "20260926-historical-publication-v31";
 const BUILD_DATE = STATIC_VERSION.slice(0, 8).replace(/^(\d{4})(\d{2})(\d{2})$/, "$1.$2.$3");
 const PUBLIC_ORIGIN = String(process.env.ARCHIVE_PUBLIC_ORIGIN || "").replace(/\/+$/, "");
 const built = spawnSync(process.execPath, ["scripts/build-html.mjs"], {
@@ -63,7 +63,7 @@ const webPayloadObject = {
         catalogueWork.authorStatus === "anonymous" ||
         catalogueWork.author === "未见署名" ||
         catalogueWork.author === "匿名";
-      if (anonymous) catalogueWork.author = "未见署名";
+      if (anonymous) catalogueWork.author = edition.status === "archived" ? "匿名" : "未见署名";
       return catalogueWork;
     }),
   })),
@@ -131,7 +131,7 @@ function renderPrerenderArticle(edition, work) {
   const excerpt = trimText(work.excerpt || "", 180);
   const authorNote = anonymous
     ? edition.status === "archived"
-      ? "历史资料未载明作者，按原件封存"
+      ? "作者按本届公示规则匿名"
       : "作者身份将在结果公示时按获奖范围解封"
     : "";
   const editionLink = `/#/${encodeURIComponent(edition.slug)}`;

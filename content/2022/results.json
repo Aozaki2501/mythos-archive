@@ -1,0 +1,999 @@
+{
+  "schemaVersion": 1,
+  "edition": "2022",
+  "source": {
+    "file": "结社设计大赛-获奖名单.xlsx",
+    "sheet": "结社设计大赛"
+  },
+  "authorRevealRankLimit": 20,
+  "rankings": [
+    {
+      "rank": 1,
+      "sourceNo": 29,
+      "workSlug": "29-海之谎言",
+      "title": "海之谎言",
+      "author": "鱼干",
+      "overall": 4.448276,
+      "award": "行云流水奖",
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 4.517241
+        },
+        {
+          "label": "设定",
+          "average": 4.37931
+        }
+      ]
+    },
+    {
+      "rank": 2,
+      "sourceNo": 6,
+      "workSlug": "06-中国道教协会",
+      "title": "中国道教协会",
+      "author": "Liquorice",
+      "overall": 4.109606,
+      "award": "绘影成真奖",
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 4.357143
+        },
+        {
+          "label": "设定",
+          "average": 3.862069
+        }
+      ]
+    },
+    {
+      "rank": 3,
+      "sourceNo": 1,
+      "workSlug": "01-隐修院",
+      "title": "隐修院",
+      "author": "清水",
+      "overall": 4.078696,
+      "award": "如约守密奖",
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 4.216216
+        },
+        {
+          "label": "设定",
+          "average": 3.941176
+        }
+      ]
+    },
+    {
+      "rank": 4,
+      "sourceNo": 15,
+      "workSlug": "15-克莱因受子教团",
+      "title": "克莱因受子教团",
+      "author": "A137",
+      "overall": 3.971925,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 4.090909
+        },
+        {
+          "label": "设定",
+          "average": 3.852941
+        }
+      ]
+    },
+    {
+      "rank": 5,
+      "sourceNo": 34,
+      "workSlug": "34-卣家",
+      "title": "卣家",
+      "author": "苍崎",
+      "overall": 3.931818,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 4.0
+        },
+        {
+          "label": "设定",
+          "average": 3.863636
+        }
+      ]
+    },
+    {
+      "rank": 6,
+      "sourceNo": 27,
+      "workSlug": "27-长城",
+      "title": "长城",
+      "author": "Flame",
+      "overall": 3.92,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.84
+        },
+        {
+          "label": "设定",
+          "average": 4.0
+        }
+      ]
+    },
+    {
+      "rank": 7,
+      "sourceNo": 13,
+      "workSlug": "13-飞天意面神教",
+      "title": "飞天意面神教",
+      "author": "余灰",
+      "overall": 3.86,
+      "award": "奇思妙想奖",
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.92
+        },
+        {
+          "label": "设定",
+          "average": 3.8
+        }
+      ]
+    },
+    {
+      "rank": 8,
+      "sourceNo": 23,
+      "workSlug": "23-食素者教团",
+      "title": "食素者教团",
+      "author": "硅酱",
+      "overall": 3.815789,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.947368
+        },
+        {
+          "label": "设定",
+          "average": 3.684211
+        }
+      ]
+    },
+    {
+      "rank": 9,
+      "sourceNo": 8,
+      "workSlug": "08-桃林坐禅宗",
+      "title": "桃林坐禅宗",
+      "author": "明前茶",
+      "overall": 3.754762,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.7
+        },
+        {
+          "label": "设定",
+          "average": 3.809524
+        }
+      ]
+    },
+    {
+      "rank": 10,
+      "sourceNo": 10,
+      "workSlug": "10-目盲者",
+      "title": "目盲者",
+      "author": "柯米",
+      "overall": 3.709486,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.636364
+        },
+        {
+          "label": "设定",
+          "average": 3.782609
+        }
+      ]
+    },
+    {
+      "rank": 11,
+      "sourceNo": 2,
+      "workSlug": "02-克利夫兰电工互助会",
+      "title": "克利夫兰电工互助会",
+      "author": "小关子",
+      "overall": 3.708333,
+      "award": "滴水不漏奖",
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.944444
+        },
+        {
+          "label": "设定",
+          "average": 3.472222
+        }
+      ]
+    },
+    {
+      "rank": 12,
+      "sourceNo": 40,
+      "workSlug": "40-玫瑰苦修会",
+      "title": "玫瑰苦修会",
+      "author": "慕凡",
+      "overall": 3.6875,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.625
+        },
+        {
+          "label": "设定",
+          "average": 3.75
+        }
+      ]
+    },
+    {
+      "rank": 13,
+      "sourceNo": 41,
+      "workSlug": "41-天演院",
+      "title": "天演院",
+      "author": "Walter",
+      "overall": 3.669737,
+      "award": "进退维谷奖",
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.789474
+        },
+        {
+          "label": "设定",
+          "average": 3.55
+        }
+      ]
+    },
+    {
+      "rank": 14,
+      "sourceNo": 9,
+      "workSlug": "09-祖先遗产学会",
+      "title": "祖先遗产学会",
+      "author": "imba",
+      "overall": 3.641544,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.470588
+        },
+        {
+          "label": "设定",
+          "average": 3.8125
+        }
+      ]
+    },
+    {
+      "rank": 15,
+      "sourceNo": 21,
+      "workSlug": "21-叹火教",
+      "title": "叹火教",
+      "author": "是小伞",
+      "overall": 3.588158,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.526316
+        },
+        {
+          "label": "设定",
+          "average": 3.65
+        }
+      ]
+    },
+    {
+      "rank": 16,
+      "sourceNo": 52,
+      "workSlug": "52-血与火",
+      "title": "血与火——维斯塔贞女教团",
+      "author": "鲑",
+      "overall": 3.583333,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 4.125
+        },
+        {
+          "label": "设定",
+          "average": 3.041667
+        }
+      ]
+    },
+    {
+      "rank": 17,
+      "sourceNo": 5,
+      "workSlug": "05-被遗忘者-邮政",
+      "title": "被遗忘者（邮政）",
+      "author": "柊羽",
+      "overall": 3.5,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.652174
+        },
+        {
+          "label": "设定",
+          "average": 3.347826
+        }
+      ]
+    },
+    {
+      "rank": 18,
+      "sourceNo": 14,
+      "workSlug": "14-主",
+      "title": "'主'",
+      "author": "匿名",
+      "overall": 3.5,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.55
+        },
+        {
+          "label": "设定",
+          "average": 3.45
+        }
+      ]
+    },
+    {
+      "rank": 19,
+      "sourceNo": 46,
+      "workSlug": "46-美国紧急事态管理防控部",
+      "title": "美国紧急事态管理防控部",
+      "author": "狗头",
+      "overall": 3.475,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.75
+        },
+        {
+          "label": "设定",
+          "average": 3.2
+        }
+      ]
+    },
+    {
+      "rank": 20,
+      "sourceNo": 33,
+      "workSlug": "33-缄默兄弟会",
+      "title": "缄默兄弟会",
+      "author": "性感恶魔人",
+      "overall": 3.461538,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.538462
+        },
+        {
+          "label": "设定",
+          "average": 3.384615
+        }
+      ]
+    },
+    {
+      "rank": 21,
+      "sourceNo": 47,
+      "workSlug": "47-定光者",
+      "title": "定光者",
+      "author": "匿名",
+      "overall": 3.443452,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.428571
+        },
+        {
+          "label": "设定",
+          "average": 3.458333
+        }
+      ]
+    },
+    {
+      "rank": 22,
+      "sourceNo": 18,
+      "workSlug": "18-真理会",
+      "title": "真理会",
+      "author": "匿名",
+      "overall": 3.420956,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.529412
+        },
+        {
+          "label": "设定",
+          "average": 3.3125
+        }
+      ]
+    },
+    {
+      "rank": 23,
+      "sourceNo": 17,
+      "workSlug": "17-应命改造者",
+      "title": "应命改造者",
+      "author": "匿名",
+      "overall": 3.3125,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.375
+        },
+        {
+          "label": "设定",
+          "average": 3.25
+        }
+      ]
+    },
+    {
+      "rank": 24,
+      "sourceNo": 42,
+      "workSlug": "42-0451调查组",
+      "title": "0451调查组",
+      "author": "匿名",
+      "overall": 3.3,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.333333
+        },
+        {
+          "label": "设定",
+          "average": 3.266667
+        }
+      ]
+    },
+    {
+      "rank": 25,
+      "sourceNo": 3,
+      "workSlug": "03-黑色记忆",
+      "title": "黑色记忆",
+      "author": "匿名",
+      "overall": 3.291667,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.208333
+        },
+        {
+          "label": "设定",
+          "average": 3.375
+        }
+      ]
+    },
+    {
+      "rank": 26,
+      "sourceNo": 20,
+      "workSlug": "20-黑森源流修会",
+      "title": "黑森源流修会",
+      "author": "匿名",
+      "overall": 3.280303,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.227273
+        },
+        {
+          "label": "设定",
+          "average": 3.333333
+        }
+      ]
+    },
+    {
+      "rank": 27,
+      "sourceNo": 38,
+      "workSlug": "38-零若",
+      "title": "无身份者",
+      "author": "匿名",
+      "overall": 3.266667,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.333333
+        },
+        {
+          "label": "设定",
+          "average": 3.2
+        }
+      ]
+    },
+    {
+      "rank": 28,
+      "sourceNo": 19,
+      "workSlug": "19-山海天地之间",
+      "title": "山海天地之间",
+      "author": "匿名",
+      "overall": 3.25,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.0
+        },
+        {
+          "label": "设定",
+          "average": 3.5
+        }
+      ]
+    },
+    {
+      "rank": 29,
+      "sourceNo": 36,
+      "workSlug": "36-象神宫",
+      "title": "象神宫",
+      "author": "匿名",
+      "overall": 3.214286,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.285714
+        },
+        {
+          "label": "设定",
+          "average": 3.142857
+        }
+      ]
+    },
+    {
+      "rank": 30,
+      "sourceNo": 35,
+      "workSlug": "35-无名结社",
+      "title": "无名结社",
+      "author": "匿名",
+      "overall": 3.214286,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.214286
+        },
+        {
+          "label": "设定",
+          "average": 3.214286
+        }
+      ]
+    },
+    {
+      "rank": 31,
+      "sourceNo": 44,
+      "workSlug": "44-纳吉尔法之船",
+      "title": "纳吉尔法之船",
+      "author": "匿名",
+      "overall": 3.166667,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.466667
+        },
+        {
+          "label": "设定",
+          "average": 2.866667
+        }
+      ]
+    },
+    {
+      "rank": 32,
+      "sourceNo": 48,
+      "workSlug": "48-金冠",
+      "title": "金冠",
+      "author": "匿名",
+      "overall": 3.138462,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.2
+        },
+        {
+          "label": "设定",
+          "average": 3.076923
+        }
+      ]
+    },
+    {
+      "rank": 33,
+      "sourceNo": 7,
+      "workSlug": "07-蚀录-秘会",
+      "title": "[蚀录]秘会",
+      "author": "匿名",
+      "overall": 3.108696,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.0
+        },
+        {
+          "label": "设定",
+          "average": 3.217391
+        }
+      ]
+    },
+    {
+      "rank": 34,
+      "sourceNo": 51,
+      "workSlug": "51-蜂群教会",
+      "title": "蜂群教会",
+      "author": "匿名",
+      "overall": 3.107143,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.285714
+        },
+        {
+          "label": "设定",
+          "average": 2.928571
+        }
+      ]
+    },
+    {
+      "rank": 35,
+      "sourceNo": 39,
+      "workSlug": "39-图书馆",
+      "title": "图书馆",
+      "author": "匿名",
+      "overall": 3.065934,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.285714
+        },
+        {
+          "label": "设定",
+          "average": 2.846154
+        }
+      ]
+    },
+    {
+      "rank": 36,
+      "sourceNo": 4,
+      "workSlug": "04-赤脚医生协会",
+      "title": "赤脚医生协会",
+      "author": "匿名",
+      "overall": 3.026957,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 2.88
+        },
+        {
+          "label": "设定",
+          "average": 3.173913
+        }
+      ]
+    },
+    {
+      "rank": 37,
+      "sourceNo": 31,
+      "workSlug": "31-舞会",
+      "title": "舞会",
+      "author": "匿名",
+      "overall": 3.0,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.482759
+        },
+        {
+          "label": "设定",
+          "average": 2.517241
+        }
+      ]
+    },
+    {
+      "rank": 38,
+      "sourceNo": 12,
+      "workSlug": "12-喵喵啦托提普教",
+      "title": "喵喵啦托提普教",
+      "author": "匿名",
+      "overall": 2.978261,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.173913
+        },
+        {
+          "label": "设定",
+          "average": 2.782609
+        }
+      ]
+    },
+    {
+      "rank": 39,
+      "sourceNo": 25,
+      "workSlug": "25-共进者",
+      "title": "共进者",
+      "author": "匿名",
+      "overall": 2.946429,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 2.964286
+        },
+        {
+          "label": "设定",
+          "average": 2.928571
+        }
+      ]
+    },
+    {
+      "rank": 40,
+      "sourceNo": 32,
+      "workSlug": "32-伦敦猎书人",
+      "title": "伦敦猎书人",
+      "author": "匿名",
+      "overall": 2.911111,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 2.722222
+        },
+        {
+          "label": "设定",
+          "average": 3.1
+        }
+      ]
+    },
+    {
+      "rank": 41,
+      "sourceNo": 26,
+      "workSlug": "26-统合共和体",
+      "title": "统合共和体",
+      "author": "匿名",
+      "overall": 2.892857,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 2.785714
+        },
+        {
+          "label": "设定",
+          "average": 3.0
+        }
+      ]
+    },
+    {
+      "rank": 42,
+      "sourceNo": 30,
+      "workSlug": "30-人类生命共同体",
+      "title": "人类生命共同体",
+      "author": "匿名",
+      "overall": 2.888889,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 2.833333
+        },
+        {
+          "label": "设定",
+          "average": 2.944444
+        }
+      ]
+    },
+    {
+      "rank": 43,
+      "sourceNo": 28,
+      "workSlug": "28-彼岸之物",
+      "title": "彼岸之物",
+      "author": "匿名",
+      "overall": 2.884615,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.230769
+        },
+        {
+          "label": "设定",
+          "average": 2.538462
+        }
+      ]
+    },
+    {
+      "rank": 44,
+      "sourceNo": 43,
+      "workSlug": "43-涡彼夜",
+      "title": "涡彼夜",
+      "author": "匿名",
+      "overall": 2.846154,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 2.769231
+        },
+        {
+          "label": "设定",
+          "average": 2.923077
+        }
+      ]
+    },
+    {
+      "rank": 45,
+      "sourceNo": 45,
+      "workSlug": "45-退休酒馆",
+      "title": "退休酒馆",
+      "author": "匿名",
+      "overall": 2.844444,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 2.888889
+        },
+        {
+          "label": "设定",
+          "average": 2.8
+        }
+      ]
+    },
+    {
+      "rank": 46,
+      "sourceNo": 16,
+      "workSlug": "16-无名结社",
+      "title": "无名结社",
+      "author": "匿名",
+      "overall": 2.840909,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 2.727273
+        },
+        {
+          "label": "设定",
+          "average": 2.954545
+        }
+      ]
+    },
+    {
+      "rank": 47,
+      "sourceNo": 11,
+      "workSlug": "11-林中间隙教会",
+      "title": "林中间隙教会",
+      "author": "匿名",
+      "overall": 2.8125,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 2.75
+        },
+        {
+          "label": "设定",
+          "average": 2.875
+        }
+      ]
+    },
+    {
+      "rank": 48,
+      "sourceNo": 37,
+      "workSlug": "37-浣湘",
+      "title": "命运之眼",
+      "author": "匿名",
+      "overall": 2.807692,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 3.0
+        },
+        {
+          "label": "设定",
+          "average": 2.615385
+        }
+      ]
+    },
+    {
+      "rank": 49,
+      "sourceNo": 22,
+      "workSlug": "53-薇娄",
+      "title": "薇娄",
+      "author": "匿名",
+      "overall": 2.75,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 2.833333
+        },
+        {
+          "label": "设定",
+          "average": 2.666667
+        }
+      ]
+    },
+    {
+      "rank": 50,
+      "sourceNo": 24,
+      "workSlug": "24-精神病人",
+      "title": "精神病人",
+      "author": "匿名",
+      "overall": 2.666008,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 2.636364
+        },
+        {
+          "label": "设定",
+          "average": 2.695652
+        }
+      ]
+    },
+    {
+      "rank": 51,
+      "sourceNo": 49,
+      "workSlug": "49-幻境之梦",
+      "title": "幻境之梦",
+      "author": "匿名",
+      "overall": 2.541667,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 2.416667
+        },
+        {
+          "label": "设定",
+          "average": 2.666667
+        }
+      ]
+    },
+    {
+      "rank": 52,
+      "sourceNo": 50,
+      "workSlug": "50-超人教派",
+      "title": "超人教派",
+      "author": "匿名",
+      "overall": 1.561111,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "秘闻",
+          "average": 1.722222
+        },
+        {
+          "label": "设定",
+          "average": 1.4
+        }
+      ]
+    }
+  ]
+}

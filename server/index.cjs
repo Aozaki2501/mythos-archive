@@ -264,6 +264,21 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_spotlight_daily_work
     ON spotlight_daily(editionSlug, workId, date);
+
+  CREATE TABLE IF NOT EXISTS edition_publications (
+    editionSlug TEXT PRIMARY KEY,
+    publishedAt TEXT NOT NULL,
+    snapshot TEXT NOT NULL
+  );
+
+  CREATE TRIGGER IF NOT EXISTS edition_publications_no_update
+    BEFORE UPDATE ON edition_publications BEGIN
+      SELECT RAISE(ABORT, '正式公示不可修改');
+    END;
+  CREATE TRIGGER IF NOT EXISTS edition_publications_no_delete
+    BEFORE DELETE ON edition_publications BEGIN
+      SELECT RAISE(ABORT, '正式公示不可删除');
+    END;
 `);
 
 // 旧库补列：评论的编辑时间（用于显示"已编辑"）
@@ -1268,6 +1283,88 @@ function editionScoreDistributions(editionSlug) {
   return distributions;
 }
 
+const EDITION_PHASES = ["征文", "评分", "统计", "公示"];
+
+function publicationOf(editionSlug) {
+  const row = db.prepare("SELECT snapshot FROM edition_publications WHERE editionSlug = ?").get(editionSlug);
+  return row ? JSON.parse(row.snapshot) : null;
+}
+
+function publicPublication(publication) {
+  return publication ? { publishedAt: publication.publishedAt } : null;
+}
+
+function publicEditionAwards(settings, editionSlug, leaderboard) {
+  const config = settings.awardConfigs && settings.awardConfigs[editionSlug];
+  if (!config) {
+    return { published: true, authorRevealRankLimit: 0, awardedWorkIds: [], authorReveals: {}, specialAwards: [] };
+  }
+  const catalogueIds = new Set(manifestCatalogueIds(editionSlug));
+  const specialAwards = (Array.isArray(config.specialAwards) ? config.specialAwards : [])
+    .filter((award) => award && catalogueIds.has(String(award.workId || "")))
+    .map((award) => ({
+      name: String(award.name || ""),
+      workId: String(award.workId || ""),
+      excerpt: String(award.excerpt || ""),
+      review: String(award.review || ""),
+    }));
+  const rankLimit = Math.max(0, Math.min(catalogueIds.size, Number(config.authorRevealRankLimit) || 0));
+  const revealIds = new Set(leaderboard.slice(0, rankLimit).map((row) => row.workId));
+  specialAwards.forEach((award) => revealIds.add(award.workId));
+  const authorReveals = {};
+  const bindings = settings.authorBindings || {};
+  revealIds.forEach((workId) => {
+    const qq = String(bindings[workId] || "");
+    if (!qq) return;
+    const author = getUser(qq);
+    if (author && author.nickname) authorReveals[workId] = author.nickname;
+  });
+  return {
+    published: true,
+    authorRevealRankLimit: rankLimit,
+    awardedWorkIds: Array.from(revealIds),
+    authorReveals,
+    specialAwards,
+  };
+}
+
+function createPublication(settings, editionSlug, confirmedBy) {
+  if (publicationOf(editionSlug)) throw new Error("本届已有正式公示");
+  const catalogueIds = new Set(manifestCatalogueIds(editionSlug));
+  if (!catalogueIds.size) throw new Error("本届目录清单为空，无法发布公示");
+  const leaderboard = editionLeaderboard(editionSlug);
+  if (leaderboard.some((row) => !catalogueIds.has(row.workId))) {
+    throw new Error("评分中存在目录外作品，请核对后再公示");
+  }
+  const publishedAt = new Date().toISOString();
+  const publication = {
+    editionSlug,
+    publishedAt,
+    confirmedBy,
+    leaderboard,
+    distributions: editionScoreDistributions(editionSlug),
+    awards: publicEditionAwards(settings, editionSlug, leaderboard),
+  };
+  db.prepare("INSERT INTO edition_publications (editionSlug, publishedAt, snapshot) VALUES (?, ?, ?)")
+    .run(editionSlug, publishedAt, JSON.stringify(publication));
+  return publication;
+}
+
+function phaseAdvanceOf(settings, editionSlug) {
+  const state = editionState(settings, editionSlug);
+  const advance = state.phaseAdvance;
+  const phaseIndex = EDITION_PHASES.indexOf(state.phase);
+  const next = phaseIndex < 0 ? null : EDITION_PHASES[phaseIndex + 1];
+  if (!advance || advance.source !== "server" || advance.next !== next || !Array.isArray(advance.votes)) {
+    return null;
+  }
+  const votes = [...new Set(advance.votes)].filter((qq) => {
+    const candidate = getUser(qq);
+    return candidate && candidate.enabled && resolveRole(settings, qq) === "admin";
+  });
+  return votes.length ? { next, votes, source: "server" } : null;
+}
+
 function emptyAwardConfig() {
   return { authorRevealRankLimit: 25, specialAwards: [] };
 }
@@ -1368,8 +1465,9 @@ async function handle(action, payload, auth, ctx) {
       const editionSlug = String(payload.editionSlug || "").trim();
       if (!/^[A-Za-z0-9_-]{1,64}$/.test(editionSlug)) throw new Error("届别编号无效");
       const st = editionState(settings, editionSlug);
+      const publication = publicationOf(editionSlug);
       const workStats = reportWorkStats(editionSlug);
-      const rankingsAvailable = st.phase === "统计" || st.phase === "公示";
+      const rankingsAvailable = !!publication || st.phase === "统计";
       const heat = workStats.map((row) => ({
         workId: row.workId,
         commentCount: row.commentCount,
@@ -1378,50 +1476,18 @@ async function handle(action, payload, auth, ctx) {
       return {
         rankingsAvailable,
         heat,
-        leaderboard: rankingsAvailable ? editionLeaderboard(editionSlug) : [],
-        distributions: rankingsAvailable ? editionScoreDistributions(editionSlug) : null,
+        leaderboard: publication ? publication.leaderboard : rankingsAvailable ? editionLeaderboard(editionSlug) : [],
+        distributions: publication ? publication.distributions : rankingsAvailable ? editionScoreDistributions(editionSlug) : null,
+        publication: publicPublication(publication),
       };
     }
 
     case "getEditionAwards": {
       const editionSlug = String(payload.editionSlug || "").trim();
       if (!/^[A-Za-z0-9_-]{1,64}$/.test(editionSlug)) throw new Error("届别编号无效");
-      if (editionState(settings, editionSlug).phase !== "公示") {
-        return { published: false, authorRevealRankLimit: 0, awardedWorkIds: [], authorReveals: {}, specialAwards: [] };
-      }
-      const config = settings.awardConfigs && settings.awardConfigs[editionSlug];
-      if (!config) {
-        return { published: true, authorRevealRankLimit: 0, awardedWorkIds: [], authorReveals: {}, specialAwards: [] };
-      }
-      const catalogueIds = new Set(manifestCatalogueIds(editionSlug));
-      const specialAwards = (Array.isArray(config.specialAwards) ? config.specialAwards : [])
-        .filter((award) => award && catalogueIds.has(String(award.workId || "")))
-        .map((award) => ({
-          name: String(award.name || ""),
-          workId: String(award.workId || ""),
-          excerpt: String(award.excerpt || ""),
-          review: String(award.review || ""),
-        }));
-      const rankLimit = Math.max(0, Math.min(catalogueIds.size, Number(config.authorRevealRankLimit) || 0));
-      const revealIds = new Set(
-        editionLeaderboard(editionSlug).slice(0, rankLimit).map((row) => row.workId),
-      );
-      specialAwards.forEach((award) => revealIds.add(award.workId));
-      const authorReveals = {};
-      const bindings = settings.authorBindings || {};
-      revealIds.forEach((workId) => {
-        const qq = String(bindings[workId] || "");
-        if (!qq) return;
-        const author = getUser(qq);
-        if (author && author.nickname) authorReveals[workId] = author.nickname;
-      });
-      return {
-        published: true,
-        authorRevealRankLimit: rankLimit,
-        awardedWorkIds: Array.from(revealIds),
-        authorReveals,
-        specialAwards,
-      };
+      const publication = publicationOf(editionSlug);
+      if (publication) return { ...publication.awards, publication: publicPublication(publication) };
+      return { published: false, authorRevealRankLimit: 0, awardedWorkIds: [], authorReveals: {}, specialAwards: [], publication: null };
     }
 
     case "requestPasswordReset": {
@@ -2217,6 +2283,7 @@ async function handle(action, payload, auth, ctx) {
       if (!user || session.role !== "admin") throw new Error("需要管理员");
       const editionSlug = String(payload.editionSlug || "").trim();
       if (!/^[A-Za-z0-9_-]{1,64}$/.test(editionSlug)) throw new Error("届别编号无效");
+      if (publicationOf(editionSlug)) throw new Error("本届已正式公示，奖项配置不可修改");
       const config = saveableAwardConfig(editionSlug, payload.config || {});
       if (!settings.awardConfigs || typeof settings.awardConfigs !== "object") settings.awardConfigs = {};
       settings.awardConfigs[editionSlug] = config;
@@ -2291,6 +2358,69 @@ async function handle(action, payload, auth, ctx) {
       return adminSpotlightState(settings, editionSlug);
     }
 
+    case "adminGetEditionPhaseState": {
+      if (!user || session.role !== "admin") throw new Error("需要管理员");
+      const editionSlug = String(payload.editionSlug || "").trim();
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(editionSlug)) throw new Error("届别编号无效");
+      const current = getSettings();
+      const st = editionState(current, editionSlug);
+      return { editionSlug, phase: st.phase, phaseAdvance: phaseAdvanceOf(current, editionSlug), publication: publicPublication(publicationOf(editionSlug)) };
+    }
+
+    case "adminConfirmEditionPhase": {
+      if (!user || session.role !== "admin") throw new Error("需要管理员");
+      const editionSlug = String(payload.editionSlug || "").trim();
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(editionSlug)) throw new Error("届别编号无效");
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const current = getSettings();
+        const confirmingUser = getUser(user.qq);
+        if (!confirmingUser || !confirmingUser.enabled || resolveRole(current, user.qq) !== "admin") {
+          throw new Error("需要管理员");
+        }
+        const st = editionState(current, editionSlug);
+        const phaseIndex = EDITION_PHASES.indexOf(st.phase);
+        if (phaseIndex < 0) throw new Error("当前阶段无效");
+        const next = EDITION_PHASES[phaseIndex + 1];
+        if (!next) throw new Error("已是最终阶段");
+        const advance = phaseAdvanceOf(current, editionSlug);
+        const votes = advance ? advance.votes.filter((qq) => qq !== user.qq) : [];
+        if (!advance || !advance.votes.includes(user.qq)) votes.push(user.qq);
+        let publication = null;
+        if (votes.length >= 2) {
+          if (next === "公示") publication = createPublication(current, editionSlug, votes);
+          st.phase = next;
+          st.phaseAdvance = null;
+        } else {
+          st.phaseAdvance = votes.length ? { next, votes, source: "server" } : null;
+        }
+        saveSettings(current);
+        db.exec("COMMIT");
+        return { editionSlug, phase: st.phase, phaseAdvance: st.phaseAdvance, publication: publicPublication(publication) };
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+
+    case "adminClearEditionPhaseConfirm": {
+      if (!user || session.role !== "admin") throw new Error("需要管理员");
+      const editionSlug = String(payload.editionSlug || "").trim();
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(editionSlug)) throw new Error("届别编号无效");
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const current = getSettings();
+        const st = editionState(current, editionSlug);
+        st.phaseAdvance = null;
+        saveSettings(current);
+        db.exec("COMMIT");
+        return { editionSlug, phase: st.phase, phaseAdvance: null, publication: publicPublication(publicationOf(editionSlug)) };
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+
     case "adminSaveSettings": {
       if (!user || session.role !== "admin") throw new Error("需要管理员");
       const next = Object.assign({}, settings);
@@ -2301,11 +2431,28 @@ async function handle(action, payload, auth, ctx) {
         "registrationOpen",
         "memberDirectory",
         "adminDirectory",
-        "editions",
         "authorBindings",
       ].forEach(function (key) {
         if (patch[key] !== undefined) next[key] = patch[key];
       });
+      if (patch.editions !== undefined) {
+        if (!patch.editions || typeof patch.editions !== "object" || Array.isArray(patch.editions)) {
+          throw new Error("届别设置无效");
+        }
+        next.editions = { ...(settings.editions || {}) };
+        for (const [slug, incoming] of Object.entries(patch.editions)) {
+          if (!/^[A-Za-z0-9_-]{1,64}$/.test(slug) || !incoming || typeof incoming !== "object" || Array.isArray(incoming)) {
+            throw new Error("届别设置无效");
+          }
+          const stored = editionState(settings, slug);
+          if ((Object.hasOwn(incoming, "phase") && incoming.phase !== stored.phase)
+            || (Object.hasOwn(incoming, "phaseAdvance")
+              && JSON.stringify(incoming.phaseAdvance || null) !== JSON.stringify(stored.phaseAdvance || null))) {
+            throw new Error("阶段与确认票数只能通过专用确认操作修改");
+          }
+          next.editions[slug] = { ...stored, ...incoming, phase: stored.phase, phaseAdvance: stored.phaseAdvance };
+        }
+      }
       if (!Array.isArray(next.adminDirectory)) next.adminDirectory = [];
       const envAdmins = getInitialAdminQQs();
       for (const a of envAdmins) {

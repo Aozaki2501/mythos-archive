@@ -1,0 +1,1341 @@
+{
+  "schemaVersion": 1,
+  "edition": "2024",
+  "source": {
+    "file": "神话地理设计大赛-参赛统计.xlsx",
+    "sheet": "最终结果"
+  },
+  "authorRevealRankLimit": 33,
+  "rankings": [
+    {
+      "rank": 1,
+      "sourceNo": 30,
+      "workSlug": "12-城市机体",
+      "title": "城市机体",
+      "author": "清水",
+      "overall": 4.529412,
+      "award": "秘地拓荒奖",
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 4.617647
+        },
+        {
+          "label": "方志",
+          "average": 4.441176
+        }
+      ]
+    },
+    {
+      "rank": 2,
+      "sourceNo": 21,
+      "workSlug": "25-一篇文章的诞生",
+      "title": "《一篇文章的诞生》",
+      "author": "Liquorice",
+      "overall": 4.488636,
+      "award": "白船引航奖",
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 4.659091
+        },
+        {
+          "label": "方志",
+          "average": 4.318182
+        }
+      ]
+    },
+    {
+      "rank": 3,
+      "sourceNo": 54,
+      "workSlug": "56-垂死地终稿",
+      "title": "垂死地",
+      "author": "苍崎",
+      "overall": 4.333333,
+      "award": "神殿先登奖",
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 4.366667
+        },
+        {
+          "label": "方志",
+          "average": 4.3
+        }
+      ]
+    },
+    {
+      "rank": 4,
+      "sourceNo": 5,
+      "workSlug": "27-纯水",
+      "title": "纯水",
+      "author": "米浆",
+      "overall": 4.2,
+      "award": "笔起山河奖",
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 4.228571
+        },
+        {
+          "label": "方志",
+          "average": 4.171429
+        }
+      ]
+    },
+    {
+      "rank": 5,
+      "sourceNo": 67,
+      "workSlug": "26-病土",
+      "title": "病土",
+      "author": "殺鸩",
+      "overall": 4.1875,
+      "award": "霞仙引游奖",
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 4.21875
+        },
+        {
+          "label": "方志",
+          "average": 4.15625
+        }
+      ]
+    },
+    {
+      "rank": 6,
+      "sourceNo": 58,
+      "workSlug": "32-流放地",
+      "title": "流放地",
+      "author": "狗头",
+      "overall": 4.03125,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 4.0
+        },
+        {
+          "label": "方志",
+          "average": 4.0625
+        }
+      ]
+    },
+    {
+      "rank": 7,
+      "sourceNo": 9,
+      "workSlug": "19-海滨",
+      "title": "海滨",
+      "author": "枫糖",
+      "overall": 3.919355,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 4.096774
+        },
+        {
+          "label": "方志",
+          "average": 3.741935
+        }
+      ]
+    },
+    {
+      "rank": 8,
+      "sourceNo": 22,
+      "workSlug": "04-彩蛋遗梦",
+      "title": "彩蛋遗梦",
+      "author": "杰克",
+      "overall": 3.85,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.866667
+        },
+        {
+          "label": "方志",
+          "average": 3.833333
+        }
+      ]
+    },
+    {
+      "rank": 9,
+      "sourceNo": 53,
+      "workSlug": "36-寻梦-奥伦索姆",
+      "title": "寻梦：奥伦索姆",
+      "author": "Flame",
+      "overall": 3.833333,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.814815
+        },
+        {
+          "label": "方志",
+          "average": 3.851852
+        }
+      ]
+    },
+    {
+      "rank": 10,
+      "sourceNo": 35,
+      "workSlug": "24-超级气球",
+      "title": "超级气球",
+      "author": "匿名",
+      "overall": 3.808824,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.941176
+        },
+        {
+          "label": "方志",
+          "average": 3.676471
+        }
+      ]
+    },
+    {
+      "rank": 11,
+      "sourceNo": 65,
+      "workSlug": "13-盗火",
+      "title": "盗火",
+      "author": "0H",
+      "overall": 3.796875,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.9375
+        },
+        {
+          "label": "方志",
+          "average": 3.65625
+        }
+      ]
+    },
+    {
+      "rank": 12,
+      "sourceNo": 40,
+      "workSlug": "35-南翼星座的欧泊",
+      "title": "南翼星座的欧泊",
+      "author": "伯劳",
+      "overall": 3.703704,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.851852
+        },
+        {
+          "label": "方志",
+          "average": 3.555556
+        }
+      ]
+    },
+    {
+      "rank": 13,
+      "sourceNo": 45,
+      "workSlug": "20-小径分岔的花园",
+      "title": "小径分岔的花园",
+      "author": "Walter",
+      "overall": 3.596154,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.615385
+        },
+        {
+          "label": "方志",
+          "average": 3.576923
+        }
+      ]
+    },
+    {
+      "rank": 14,
+      "sourceNo": 25,
+      "workSlug": "53-永寿城",
+      "title": "永寿城",
+      "author": "性感恶魔人",
+      "overall": 3.557692,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.576923
+        },
+        {
+          "label": "方志",
+          "average": 3.538462
+        }
+      ]
+    },
+    {
+      "rank": 15,
+      "sourceNo": 68,
+      "workSlug": "17-深空星海之腹",
+      "title": "深空星海之腹",
+      "author": "硅酱",
+      "overall": 3.534483,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.517241
+        },
+        {
+          "label": "方志",
+          "average": 3.551724
+        }
+      ]
+    },
+    {
+      "rank": 16,
+      "sourceNo": 43,
+      "workSlug": "46-永续之都司拜·伏图拉",
+      "title": "永续之都司拜·伏图拉",
+      "author": "Hourai@",
+      "overall": 3.518519,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.518519
+        },
+        {
+          "label": "方志",
+          "average": 3.518519
+        }
+      ]
+    },
+    {
+      "rank": 17,
+      "sourceNo": 36,
+      "workSlug": "60-伊阑",
+      "title": "伊阑",
+      "author": "余灰",
+      "overall": 3.517241,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.551724
+        },
+        {
+          "label": "方志",
+          "average": 3.482759
+        }
+      ]
+    },
+    {
+      "rank": 18,
+      "sourceNo": 48,
+      "workSlug": "58-最后一案",
+      "title": "最后一案",
+      "author": "鲑",
+      "overall": 3.5,
+      "award": "独辟蹊径奖",
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.588235
+        },
+        {
+          "label": "方志",
+          "average": 3.411765
+        }
+      ]
+    },
+    {
+      "rank": 19,
+      "sourceNo": 55,
+      "workSlug": "09-种子",
+      "title": "种子",
+      "author": "查内姆",
+      "overall": 3.5,
+      "award": "迷宫之主奖",
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.5
+        },
+        {
+          "label": "方志",
+          "average": 3.5
+        }
+      ]
+    },
+    {
+      "rank": 20,
+      "sourceNo": 33,
+      "workSlug": "48-在布尔吉斯下",
+      "title": "在布尔吉斯下",
+      "author": "黑死",
+      "overall": 3.490079,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.535714
+        },
+        {
+          "label": "方志",
+          "average": 3.444444
+        }
+      ]
+    },
+    {
+      "rank": 21,
+      "sourceNo": 10,
+      "workSlug": "01-影子岛",
+      "title": "影子岛",
+      "author": "李太白",
+      "overall": 3.416667,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.466667
+        },
+        {
+          "label": "方志",
+          "average": 3.366667
+        }
+      ]
+    },
+    {
+      "rank": 22,
+      "sourceNo": 3,
+      "workSlug": "18-人偶乌托邦",
+      "title": "人偶乌托邦",
+      "author": "匿名",
+      "overall": 3.411765,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.529412
+        },
+        {
+          "label": "方志",
+          "average": 3.294118
+        }
+      ]
+    },
+    {
+      "rank": 23,
+      "sourceNo": 32,
+      "workSlug": "62-雾礁与玉城",
+      "title": "雾礁与玉城",
+      "author": "Max",
+      "overall": 3.38,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.36
+        },
+        {
+          "label": "方志",
+          "average": 3.4
+        }
+      ]
+    },
+    {
+      "rank": 24,
+      "sourceNo": 1,
+      "workSlug": "49-泡影",
+      "title": "泡影",
+      "author": "MASK",
+      "overall": 3.333333,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.424242
+        },
+        {
+          "label": "方志",
+          "average": 3.242424
+        }
+      ]
+    },
+    {
+      "rank": 25,
+      "sourceNo": 66,
+      "workSlug": "45-蜃漠",
+      "title": "蜃漠",
+      "author": "gkd",
+      "overall": 3.327586,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.275862
+        },
+        {
+          "label": "方志",
+          "average": 3.37931
+        }
+      ]
+    },
+    {
+      "rank": 26,
+      "sourceNo": 50,
+      "workSlug": "21-涝朝山游记",
+      "title": "涝朝山游记",
+      "author": "埃尔",
+      "overall": 3.326923,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.384615
+        },
+        {
+          "label": "方志",
+          "average": 3.269231
+        }
+      ]
+    },
+    {
+      "rank": 27,
+      "sourceNo": 23,
+      "workSlug": "28-亡语",
+      "title": "亡语",
+      "author": "路痴脸盲",
+      "overall": 3.307692,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.461538
+        },
+        {
+          "label": "方志",
+          "average": 3.153846
+        }
+      ]
+    },
+    {
+      "rank": 28,
+      "sourceNo": 56,
+      "workSlug": "16-丝之歌",
+      "title": "丝之歌",
+      "author": "贤狼初号姬",
+      "overall": 3.3,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.4
+        },
+        {
+          "label": "方志",
+          "average": 3.2
+        }
+      ]
+    },
+    {
+      "rank": 29,
+      "sourceNo": 44,
+      "workSlug": "61-那里不是乐园",
+      "title": "那里不是乐园",
+      "author": "触手与翼的四重奏",
+      "overall": 3.24,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.48
+        },
+        {
+          "label": "方志",
+          "average": 3.0
+        }
+      ]
+    },
+    {
+      "rank": 30,
+      "sourceNo": 52,
+      "workSlug": "64-南中古事录",
+      "title": "南中古事录",
+      "author": "哲",
+      "overall": 3.233333,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.333333
+        },
+        {
+          "label": "方志",
+          "average": 3.133333
+        }
+      ]
+    },
+    {
+      "rank": 31,
+      "sourceNo": 51,
+      "workSlug": "34-内克尔",
+      "title": "内克尔",
+      "author": "七次方",
+      "overall": 3.22,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.0
+        },
+        {
+          "label": "方志",
+          "average": 3.44
+        }
+      ]
+    },
+    {
+      "rank": 32,
+      "sourceNo": 26,
+      "workSlug": "30-月之影-影之海",
+      "title": "月之影 影之海",
+      "author": "明前茶",
+      "overall": 3.216667,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.266667
+        },
+        {
+          "label": "方志",
+          "average": 3.166667
+        }
+      ]
+    },
+    {
+      "rank": 33,
+      "sourceNo": 29,
+      "workSlug": "42-人偶",
+      "title": "人偶",
+      "author": "延斐",
+      "overall": 3.211538,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.269231
+        },
+        {
+          "label": "方志",
+          "average": 3.153846
+        }
+      ]
+    },
+    {
+      "rank": 34,
+      "sourceNo": 4,
+      "workSlug": "08-理想国",
+      "title": "理想国",
+      "author": "匿名",
+      "overall": 3.189655,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.241379
+        },
+        {
+          "label": "方志",
+          "average": 3.137931
+        }
+      ]
+    },
+    {
+      "rank": 35,
+      "sourceNo": 38,
+      "workSlug": "22-常世的妖精国",
+      "title": "常世的妖精国",
+      "author": "匿名",
+      "overall": 3.16,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.24
+        },
+        {
+          "label": "方志",
+          "average": 3.08
+        }
+      ]
+    },
+    {
+      "rank": 36,
+      "sourceNo": 61,
+      "workSlug": "33-半夜游",
+      "title": "半夜游",
+      "author": "匿名",
+      "overall": 3.142857,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.285714
+        },
+        {
+          "label": "方志",
+          "average": 3.0
+        }
+      ]
+    },
+    {
+      "rank": 37,
+      "sourceNo": 60,
+      "workSlug": "63-逐月之犬-和坠落的太阳信徒",
+      "title": "《逐月之犬，和坠落的太阳信徒》",
+      "author": "匿名",
+      "overall": 3.132353,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.235294
+        },
+        {
+          "label": "方志",
+          "average": 3.029412
+        }
+      ]
+    },
+    {
+      "rank": 38,
+      "sourceNo": 27,
+      "workSlug": "50-培育记录第1111号",
+      "title": "培育记录第1111号",
+      "author": "匿名",
+      "overall": 3.12069,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 2.62069
+        },
+        {
+          "label": "方志",
+          "average": 3.62069
+        }
+      ]
+    },
+    {
+      "rank": 39,
+      "sourceNo": 11,
+      "workSlug": "02-匣中之花The-Blossom-Enclosed",
+      "title": "《匣中之花The Blossom Enclosed》",
+      "author": "匿名",
+      "overall": 3.078125,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.0625
+        },
+        {
+          "label": "方志",
+          "average": 3.09375
+        }
+      ]
+    },
+    {
+      "rank": 40,
+      "sourceNo": 16,
+      "workSlug": "15-白云深处",
+      "title": "白云深处",
+      "author": "匿名",
+      "overall": 3.055556,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.037037
+        },
+        {
+          "label": "方志",
+          "average": 3.074074
+        }
+      ]
+    },
+    {
+      "rank": 41,
+      "sourceNo": 57,
+      "workSlug": "44-Motherland",
+      "title": "Motherland",
+      "author": "匿名",
+      "overall": 3.051724,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.137931
+        },
+        {
+          "label": "方志",
+          "average": 2.965517
+        }
+      ]
+    },
+    {
+      "rank": 42,
+      "sourceNo": 20,
+      "workSlug": "39-环外",
+      "title": "环外",
+      "author": "匿名",
+      "overall": 3.037037,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.0
+        },
+        {
+          "label": "方志",
+          "average": 3.074074
+        }
+      ]
+    },
+    {
+      "rank": 43,
+      "sourceNo": 7,
+      "workSlug": "07-不知岛",
+      "title": "不知岛",
+      "author": "匿名",
+      "overall": 3.034483,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.103448
+        },
+        {
+          "label": "方志",
+          "average": 2.965517
+        }
+      ]
+    },
+    {
+      "rank": 44,
+      "sourceNo": 59,
+      "workSlug": "47-终火",
+      "title": "终火",
+      "author": "匿名",
+      "overall": 3.014706,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.147059
+        },
+        {
+          "label": "方志",
+          "average": 2.882353
+        }
+      ]
+    },
+    {
+      "rank": 45,
+      "sourceNo": 8,
+      "workSlug": "65-舞台上的奥德赛",
+      "title": "舞台上的奥德赛",
+      "author": "匿名",
+      "overall": 3.0,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.033333
+        },
+        {
+          "label": "方志",
+          "average": 2.966667
+        }
+      ]
+    },
+    {
+      "rank": 46,
+      "sourceNo": 39,
+      "workSlug": "11-岛屿",
+      "title": "岛屿",
+      "author": "匿名",
+      "overall": 3.0,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.24
+        },
+        {
+          "label": "方志",
+          "average": 2.76
+        }
+      ]
+    },
+    {
+      "rank": 47,
+      "sourceNo": 41,
+      "workSlug": "51-跃入兔子洞",
+      "title": "跃入兔子洞",
+      "author": "匿名",
+      "overall": 3.0,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.111111
+        },
+        {
+          "label": "方志",
+          "average": 2.888889
+        }
+      ]
+    },
+    {
+      "rank": 48,
+      "sourceNo": 18,
+      "workSlug": "03-通往北落师门之路",
+      "title": "通往北落师门之路",
+      "author": "匿名",
+      "overall": 2.983333,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.0
+        },
+        {
+          "label": "方志",
+          "average": 2.966667
+        }
+      ]
+    },
+    {
+      "rank": 49,
+      "sourceNo": 34,
+      "workSlug": "23-Bourbaki空间",
+      "title": "Bourbaki空间",
+      "author": "匿名",
+      "overall": 2.970588,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.0
+        },
+        {
+          "label": "方志",
+          "average": 2.941176
+        }
+      ]
+    },
+    {
+      "rank": 50,
+      "sourceNo": 12,
+      "workSlug": "54-绿炎下的格密伍德尔",
+      "title": "绿炎下的格密伍德尔",
+      "author": "匿名",
+      "overall": 2.935484,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 2.903226
+        },
+        {
+          "label": "方志",
+          "average": 2.967742
+        }
+      ]
+    },
+    {
+      "rank": 51,
+      "sourceNo": 28,
+      "workSlug": "05-缪斯之庭",
+      "title": "缪斯之庭",
+      "author": "匿名",
+      "overall": 2.935484,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.0
+        },
+        {
+          "label": "方志",
+          "average": 2.870968
+        }
+      ]
+    },
+    {
+      "rank": 52,
+      "sourceNo": 14,
+      "workSlug": "10-犹格索托斯的生态瓶",
+      "title": "犹格索托斯的生态瓶",
+      "author": "匿名",
+      "overall": 2.931034,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 2.862069
+        },
+        {
+          "label": "方志",
+          "average": 3.0
+        }
+      ]
+    },
+    {
+      "rank": 53,
+      "sourceNo": 15,
+      "workSlug": "29-克里斯·海沃森的葬身之地",
+      "title": "克里斯·海沃森的葬身之地",
+      "author": "匿名",
+      "overall": 2.923077,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.192308
+        },
+        {
+          "label": "方志",
+          "average": 2.653846
+        }
+      ]
+    },
+    {
+      "rank": 54,
+      "sourceNo": 70,
+      "workSlug": "70-岛霉",
+      "title": "岛霉",
+      "author": "匿名",
+      "overall": 2.923077,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.038462
+        },
+        {
+          "label": "方志",
+          "average": 2.807692
+        }
+      ]
+    },
+    {
+      "rank": 55,
+      "sourceNo": 63,
+      "workSlug": "37-卡尔克萨",
+      "title": "卡尔克萨",
+      "author": "匿名",
+      "overall": 2.907407,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.074074
+        },
+        {
+          "label": "方志",
+          "average": 2.740741
+        }
+      ]
+    },
+    {
+      "rank": 56,
+      "sourceNo": 13,
+      "workSlug": "38-72-011-Rojo-Visceral-血污红",
+      "title": "72.011 Rojo Visceral 血污红",
+      "author": "匿名",
+      "overall": 2.892857,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 2.928571
+        },
+        {
+          "label": "方志",
+          "average": 2.857143
+        }
+      ]
+    },
+    {
+      "rank": 57,
+      "sourceNo": 2,
+      "workSlug": "43-一个叫云理狭的人准备自杀",
+      "title": "一个叫云理狭的人准备自杀",
+      "author": "匿名",
+      "overall": 2.878788,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 2.909091
+        },
+        {
+          "label": "方志",
+          "average": 2.848485
+        }
+      ]
+    },
+    {
+      "rank": 58,
+      "sourceNo": 49,
+      "workSlug": "06-猫彩",
+      "title": "猫彩",
+      "author": "匿名",
+      "overall": 2.87037,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.074074
+        },
+        {
+          "label": "方志",
+          "average": 2.666667
+        }
+      ]
+    },
+    {
+      "rank": 59,
+      "sourceNo": 69,
+      "workSlug": "69-颠倒",
+      "title": "颠倒",
+      "author": "匿名",
+      "overall": 2.862069,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 3.206897
+        },
+        {
+          "label": "方志",
+          "average": 2.517241
+        }
+      ]
+    },
+    {
+      "rank": 60,
+      "sourceNo": 42,
+      "workSlug": "66-无形之岛",
+      "title": "无形之岛",
+      "author": "匿名",
+      "overall": 2.86,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 2.96
+        },
+        {
+          "label": "方志",
+          "average": 2.76
+        }
+      ]
+    },
+    {
+      "rank": 61,
+      "sourceNo": 24,
+      "workSlug": "68-巨象",
+      "title": "巨象",
+      "author": "匿名",
+      "overall": 2.846154,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 2.846154
+        },
+        {
+          "label": "方志",
+          "average": 2.846154
+        }
+      ]
+    },
+    {
+      "rank": 62,
+      "sourceNo": 46,
+      "workSlug": "71-古安纳托利亚风俗考",
+      "title": "古安纳托利亚风俗考",
+      "author": "匿名",
+      "overall": 2.807692,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 2.615385
+        },
+        {
+          "label": "方志",
+          "average": 3.0
+        }
+      ]
+    },
+    {
+      "rank": 63,
+      "sourceNo": 19,
+      "workSlug": "31-志怪",
+      "title": "志怪",
+      "author": "匿名",
+      "overall": 2.777778,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 2.851852
+        },
+        {
+          "label": "方志",
+          "average": 2.703704
+        }
+      ]
+    },
+    {
+      "rank": 64,
+      "sourceNo": 37,
+      "workSlug": "14-THE-RAIN",
+      "title": "THE RAIN",
+      "author": "匿名",
+      "overall": 2.671875,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 2.59375
+        },
+        {
+          "label": "方志",
+          "average": 2.75
+        }
+      ]
+    },
+    {
+      "rank": 65,
+      "sourceNo": 64,
+      "workSlug": "67-九八年五月与李君书",
+      "title": "《九八年五月与李君书》",
+      "author": "匿名",
+      "overall": 2.666667,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 2.875
+        },
+        {
+          "label": "方志",
+          "average": 2.458333
+        }
+      ]
+    },
+    {
+      "rank": 66,
+      "sourceNo": 62,
+      "workSlug": "40-哲人王",
+      "title": "哲人王",
+      "author": "匿名",
+      "overall": 2.66,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 2.64
+        },
+        {
+          "label": "方志",
+          "average": 2.68
+        }
+      ]
+    },
+    {
+      "rank": 67,
+      "sourceNo": 17,
+      "workSlug": "55-许以臣民之梦",
+      "title": "许以臣民之梦",
+      "author": "匿名",
+      "overall": 2.625,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 2.535714
+        },
+        {
+          "label": "方志",
+          "average": 2.714286
+        }
+      ]
+    },
+    {
+      "rank": 68,
+      "sourceNo": 47,
+      "workSlug": "52-不存在的店铺",
+      "title": "不存在的店铺",
+      "author": "匿名",
+      "overall": 2.288462,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 2.307692
+        },
+        {
+          "label": "方志",
+          "average": 2.269231
+        }
+      ]
+    },
+    {
+      "rank": 69,
+      "sourceNo": 31,
+      "workSlug": "41-810工作组对英材县地区异常报警现象寻访资料",
+      "title": "810工作组对英材县地区异常报警现象寻访资料",
+      "author": "匿名",
+      "overall": 2.15625,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 2.3125
+        },
+        {
+          "label": "方志",
+          "average": 2.0
+        }
+      ]
+    },
+    {
+      "rank": 70,
+      "sourceNo": 6,
+      "workSlug": "59-深海恐惧症",
+      "title": "《深海恐惧症》",
+      "author": "匿名",
+      "overall": 2.063768,
+      "award": null,
+      "dimensions": [
+        {
+          "label": "游记",
+          "average": 2.866667
+        },
+        {
+          "label": "方志",
+          "average": 1.26087
+        }
+      ]
+    }
+  ]
+}

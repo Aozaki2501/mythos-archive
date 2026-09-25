@@ -676,8 +676,22 @@
       return window.MythosAPI.call("adminGetUsers");
     }).then(function (data) {
       mergeCloudUsers(data && data.users);
-      return data;
+      return window.MythosAPI.adminGetEditionPhaseState(state.editionSlug).then(function (phaseState) {
+        applyCloudEditionPhaseState(phaseState);
+        return data;
+      });
     });
+  }
+
+  function applyCloudEditionPhaseState(data) {
+    if (!data || !data.editionSlug) return;
+    var st = editionState(data.editionSlug);
+    st.phase = data.phase;
+    st.phaseAdvance = data.phaseAdvance || null;
+    store.settings.editions[data.editionSlug] = st;
+    cloudInsightsLoaded[data.editionSlug] = false;
+    cloudAwardsLoaded[data.editionSlug] = false;
+    persist();
   }
 
   function cloudBootstrap() {
@@ -692,6 +706,14 @@
 
   function pushCloudSettings() {
     if (!USE_CLOUD || !isAdmin()) return Promise.resolve();
+    var editions = {};
+    Object.keys(store.settings.editions || {}).forEach(function (slug) {
+      var current = store.settings.editions[slug] || {};
+      editions[slug] = {
+        voteDeadline: current.voteDeadline || "",
+        deadlines: current.deadlines || {},
+      };
+    });
     return window.MythosAPI.call("adminSaveSettings", {
       settings: {
         allowVisitor: store.settings.allowVisitor,
@@ -699,7 +721,7 @@
         registrationOpen: store.settings.registrationOpen,
         memberDirectory: store.settings.memberDirectory || [],
         adminDirectory: store.settings.adminDirectory || [],
-        editions: store.settings.editions || {},
+        editions: editions,
         authorBindings: store.settings.authorBindings || {},
       },
     }).then(function (data) {
@@ -3811,6 +3833,12 @@
   }
 
   function togglePhaseConfirm(slug, nextKey) {
+    if (USE_CLOUD) {
+      return window.MythosAPI.adminConfirmEditionPhase(slug).then(function (data) {
+        applyCloudEditionPhaseState(data);
+        return data;
+      });
+    }
     var st = editionState(slug);
     var user = currentUser();
     if (!user || !isAdmin()) return;
@@ -3830,15 +3858,21 @@
     }
     store.settings.editions[slug] = st;
     persist();
-    if (USE_CLOUD) pushCloudSettings().catch(function (e) { console.error(e); });
+    return Promise.resolve();
   }
 
   function clearPhaseConfirm(slug) {
+    if (USE_CLOUD) {
+      return window.MythosAPI.adminClearEditionPhaseConfirm(slug).then(function (data) {
+        applyCloudEditionPhaseState(data);
+        return data;
+      });
+    }
     var st = editionState(slug);
     st.phaseAdvance = null;
     store.settings.editions[slug] = st;
     persist();
-    if (USE_CLOUD) pushCloudSettings().catch(function (e) { console.error(e); });
+    return Promise.resolve();
   }
 
   function openAdminModal() {
@@ -3947,15 +3981,25 @@
       );
       confirmBtn.type = "button";
       confirmBtn.addEventListener("click", function () {
-        togglePhaseConfirm(slug, next);
-        openAdminModal();
-        route();
+        confirmBtn.disabled = true;
+        togglePhaseConfirm(slug, next).then(function () {
+          openAdminModal();
+          route();
+        }).catch(function (e) {
+          confirmBtn.disabled = false;
+          alert(e.message || String(e));
+        });
       });
       var clearBtn = el("button", "btn-ghost", "清空确认计数");
       clearBtn.type = "button";
       clearBtn.addEventListener("click", function () {
-        clearPhaseConfirm(slug);
-        openAdminModal();
+        clearBtn.disabled = true;
+        clearPhaseConfirm(slug).then(function () {
+          openAdminModal();
+        }).catch(function (e) {
+          clearBtn.disabled = false;
+          alert(e.message || String(e));
+        });
       });
       phaseRow.appendChild(confirmBtn);
       phaseRow.appendChild(clearBtn);
@@ -5689,6 +5733,18 @@
     });
     refs.toc.appendChild(overview);
 
+    var tocEdition = findEdition(state.editionSlug);
+    if (historicalResultsOf(tocEdition)) {
+      var publicationLink = el("button", "toc-overview", "查看本届公示");
+      publicationLink.type = "button";
+      if (location.hash.indexOf("__results") !== -1) publicationLink.setAttribute("aria-current", "true");
+      publicationLink.addEventListener("click", function () {
+        location.hash = "#/" + state.editionSlug + "/__results";
+        collapseSidebarOnMobile();
+      });
+      refs.toc.appendChild(publicationLink);
+    }
+
     var works = visibleWorks();
     if (!works.length) {
       var edition = findEdition(state.editionSlug);
@@ -6632,6 +6688,165 @@
     return "conic-gradient(" + parts.join(", ") + ")";
   }
 
+  function historicalResultsOf(edition) {
+    return edition && edition.results && Array.isArray(edition.results.rankings)
+      ? edition.results
+      : null;
+  }
+
+  function historicalReviewsOf(edition) {
+    return edition && edition.reviews && Array.isArray(edition.reviews.reviews)
+      ? edition.reviews.reviews.filter(function (review) { return review && review.body; })
+      : [];
+  }
+
+  function reviewsForHistoricalWork(edition, work) {
+    return historicalReviewsOf(edition).filter(function (review) {
+      return review.workSlug === work.slug;
+    });
+  }
+
+  function appendHistoricalReviewText(parent, body) {
+    String(body || "")
+      .split(/\n\s*\n/)
+      .map(function (paragraph) { return paragraph.trim(); })
+      .filter(Boolean)
+      .forEach(function (paragraph) {
+        parent.appendChild(el("p", null, paragraph));
+      });
+  }
+
+  function renderHistoricalReview(review, index) {
+    var item = el("div", "historical-review");
+    var reviewerLabel = review.reviewer === "评委组" && index != null
+      ? "评委组评语 " + (index + 1)
+      : (review.reviewer || "评委组评语");
+    item.appendChild(el("h4", "historical-review-by", reviewerLabel));
+    var body = el("div", "historical-review-body");
+    appendHistoricalReviewText(body, review.body);
+    item.appendChild(body);
+    return item;
+  }
+
+  function renderHistoricalWorkReviews(edition, work) {
+    var reviews = reviewsForHistoricalWork(edition, work);
+    if (!reviews.length) return null;
+    var panel = el("section", "panel historical-work-reviews");
+    panel.appendChild(el("h2", "panel-title", "评委评语"));
+    panel.appendChild(el("p", "rate-hint", "据当届评语整理并校对。"));
+    reviews.forEach(function (review, index) { panel.appendChild(renderHistoricalReview(review, index)); });
+    return panel;
+  }
+
+  function renderHistoricalResults(edition, publication) {
+    var rankings = publication.rankings || [];
+    var reviews = historicalReviewsOf(edition);
+    var worksBySlug = {};
+    (edition.works || []).forEach(function (work) { worksBySlug[work.slug] = work; });
+    var sheet = el("div", "sheet results-sheet historical-results-sheet");
+    var head = el("header", "results-head");
+    var main = el("div", "results-head-main");
+    main.appendChild(el("p", "results-kicker", "幻梦境档案馆 · " + edition.year));
+    main.appendChild(el("h1", "results-title", "结果公报"));
+    main.appendChild(el("p", "results-edition", edition.shortName));
+    head.appendChild(main);
+    var aside = el("div", "results-head-aside");
+    aside.appendChild(el("div", "results-status-mark is-official", "正式公示"));
+    head.appendChild(aside);
+    sheet.appendChild(head);
+    sheet.appendChild(el("p", "intro-text results-intro", "按当届最终结果整理。名次和奖项保留原公示口径。"));
+
+    var summary = el("dl", "results-summary");
+    [
+      ["排名作品", rankings.length + " 篇"],
+      ["获奖作品", rankings.filter(function (row) { return !!row.award; }).length + " 篇"],
+      ["已校对评语", reviews.length + " 条"],
+    ].forEach(function (pair) {
+      var item = el("div", "results-summary-item");
+      item.appendChild(el("dt", null, pair[0]));
+      item.appendChild(el("dd", null, pair[1]));
+      summary.appendChild(item);
+    });
+    sheet.appendChild(summary);
+
+    sheet.appendChild(el("h2", "panel-title results-rank-title", "最终排名"));
+    sheet.appendChild(el("p", "historical-scroll-hint", "左右滑动排名表，可查看分数和奖项。"));
+    var tableWrap = el("div", "historical-rank-scroll");
+    var table = el("table", "rank-table historical-rank-table");
+    var headRow = el("tr");
+    var dimensionLabels = rankings.length && Array.isArray(rankings[0].dimensions)
+      ? rankings[0].dimensions.map(function (dim) { return dim.label; })
+      : [];
+    ["名次", "作品", "作者"].concat(dimensionLabels, ["综合", "奖项"]).forEach(function (label) {
+      headRow.appendChild(el("th", null, label));
+    });
+    var thead = el("thead");
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+    var tbody = el("tbody");
+    rankings.forEach(function (row) {
+      var work = row.workSlug && worksBySlug[row.workSlug];
+      var tr = el("tr", "rank-table-row" + (row.rank <= 3 ? " rank-table-row-top rank-table-row-top-" + row.rank : ""));
+      tr.appendChild(el("td", "rank-cell", String(row.rank)));
+      var titleCell = el("td", "rank-title-cell");
+      if (work) {
+        var titleButton = el("button", "edition-index-title historical-rank-title", row.title);
+        titleButton.type = "button";
+        titleButton.addEventListener("click", function () {
+          location.hash = "#/" + edition.slug + "/" + encodeURIComponent(work.slug);
+        });
+        titleCell.appendChild(titleButton);
+      } else {
+        titleCell.appendChild(el("span", "historical-unlinked-title", row.title));
+      }
+      tr.appendChild(titleCell);
+      tr.appendChild(el("td", "rank-author-cell", row.author || "未见署名"));
+      dimensionLabels.forEach(function (label) {
+        var dim = (row.dimensions || []).filter(function (item) { return item.label === label; })[0];
+        tr.appendChild(el("td", "rank-score-cell", dim && dim.average != null && Number.isFinite(Number(dim.average)) ? Number(dim.average).toFixed(2) : "—"));
+      });
+      tr.appendChild(el("td", "rank-score-cell", row.overall != null && Number.isFinite(Number(row.overall)) ? Number(row.overall).toFixed(2) : "—"));
+      tr.appendChild(el("td", "historical-award-cell", row.award || "—"));
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    tableWrap.appendChild(table);
+    sheet.appendChild(tableWrap);
+
+    if (reviews.length) {
+      sheet.appendChild(el("h2", "panel-title historical-reviews-title", "评委评语"));
+      var groups = [];
+      reviews.forEach(function (review) {
+        var key = review.workSlug || review.workTitle || review.award || "";
+        var group = groups.filter(function (entry) { return entry.key === key; })[0];
+        if (!group) {
+          var linkedWork = review.workSlug && worksBySlug[review.workSlug];
+          group = { key: key, title: linkedWork ? linkedWork.title : (review.workTitle || review.award || "评语"), workSlug: review.workSlug, reviews: [] };
+          groups.push(group);
+        }
+        group.reviews.push(review);
+      });
+      var reviewList = el("div", "historical-review-list");
+      groups.forEach(function (group) {
+        var details = el("details", "historical-review-group");
+        details.appendChild(el("summary", null, group.title + " · " + group.reviews.length + " 条评语"));
+        if (group.workSlug && worksBySlug[group.workSlug]) {
+          var workButton = el("button", "btn-ghost historical-review-work-link", "阅读作品");
+          workButton.type = "button";
+          workButton.addEventListener("click", function () {
+            location.hash = "#/" + edition.slug + "/" + encodeURIComponent(group.workSlug);
+          });
+          details.appendChild(workButton);
+        }
+        group.reviews.forEach(function (review, index) { details.appendChild(renderHistoricalReview(review, index)); });
+        reviewList.appendChild(details);
+      });
+      sheet.appendChild(reviewList);
+    }
+    refs.content.appendChild(sheet);
+    window.scrollTo(0, 0);
+  }
+
   function renderResults(edition) {
     stopReadingTracking();
     if (sectionObserver) {
@@ -6640,6 +6855,18 @@
     }
     hideHud();
     clear(refs.content);
+    var historicalResults = historicalResultsOf(edition);
+    if (historicalResults) {
+      renderHistoricalResults(edition, historicalResults);
+      return;
+    }
+    if (isArchivedEdition(edition)) {
+      var pending = el("div", "sheet results-sheet");
+      pending.appendChild(el("h1", "results-title", edition.shortName + " · 公示待整理"));
+      pending.appendChild(el("p", "intro-text", "本届尚无可核对的正式结果。"));
+      refs.content.appendChild(pending);
+      return;
+    }
     if (USE_CLOUD && !cloudInsightsLoaded[edition.slug]) {
       refs.content.appendChild(el("div", "sheet", "正在加载本届公开数据…"));
       loadCloudEditionInsights(edition.slug)
@@ -6664,9 +6891,8 @@
     }
     var awardResult = editionAwardsData(edition.slug);
     var sheet = el("div", "sheet results-sheet");
-    var officialResults =
-      isArchivedEdition(edition) ||
-      (isPublicPhase(edition.slug) && awardResult && awardResult.published);
+    var officialResults = isPublicPhase(edition.slug) && awardResult && awardResult.published &&
+      (!USE_CLOUD || !!awardResult.publication);
     var resultsHead = el("header", "results-head");
     var resultsHeadMain = el("div", "results-head-main");
     resultsHeadMain.appendChild(
@@ -6695,10 +6921,10 @@
     resultsHeadAside.appendChild(resultsMark);
     resultsHead.appendChild(resultsHeadAside);
     sheet.appendChild(resultsHead);
-    var resultIntro = isPublicPhase(edition.slug)
+    var resultIntro = officialResults
       ? "结果公示。下列为综合均分排名与分数分布。"
-      : "本届尚未进入结果公示。管理员可在管理面板双人确认推进阶段；下列为当前实时数据预览。";
-    if (awardResult && awardResult.published && isPublicPhase(edition.slug)) {
+      : "本届尚未发布固定结果。管理员可在管理面板双人确认推进阶段；下列为当前实时数据预览。";
+    if (awardResult && awardResult.published && officialResults) {
       resultIntro += awardResult.authorRevealRankLimit
         ? "前 " + awardResult.authorRevealRankLimit + " 名及特别奖作品公开作者，其余作品匿名。"
         : "特别奖作品公开作者，其余作品匿名。";
@@ -8433,6 +8659,9 @@
           ? phaseLabel(phaseOf(edition.slug))
           : "待补充";
       if (isArchivedEdition(edition)) {
+        if (historicalResultsOf(edition)) {
+          main.appendChild(el("small", "archive-volume-publication", "结果已公示"));
+        }
         var seal = el("span", "archive-volume-status archive-volume-seal");
         seal.setAttribute("aria-label", status);
         seal.appendChild(createInkSeal(status));
@@ -8684,6 +8913,11 @@
     if (timeline) head.appendChild(timeline);
     var headTools = el("div", "edition-head-tools");
     headTools.appendChild(renderPhaseChip(edition.slug));
+    if (historicalResultsOf(edition)) {
+      var publication = el("a", "btn edition-publication-link", "查看本届公示");
+      publication.href = "#/" + edition.slug + "/__results";
+      headTools.appendChild(publication);
+    }
     var shareVolume = el("button", "btn-ghost edition-share-volume", "分享本卷");
     shareVolume.type = "button";
     shareVolume.addEventListener("click", function () {
@@ -9316,6 +9550,8 @@
       sheet.appendChild(head);
       sheet.appendChild(body);
       sheet.appendChild(renderWorkEndMark(edition, work, contentOverride));
+      var historicalReviews = renderHistoricalWorkReviews(edition, work);
+      if (historicalReviews) sheet.appendChild(historicalReviews);
       var authorNote = renderAuthorNotePanel(id, work);
       if (authorNote) sheet.appendChild(authorNote);
       sheet.appendChild(renderRatingSectionDivider());
@@ -9579,7 +9815,7 @@
       state.workSlug = "";
       if (state.view !== "results") applySidebarCollapsed(true);
       state.view = "results";
-      setDocumentTitle(["投票公示", edition.shortName]);
+      setDocumentTitle([historicalResultsOf(edition) ? "结果公报" : "投票公示", edition.shortName]);
       setLayoutMode("results");
       renderToc();
       renderResults(edition);

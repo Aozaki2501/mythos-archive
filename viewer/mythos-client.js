@@ -93,6 +93,23 @@
     bootstrap: function (options) {
       return call("bootstrap", {}, options);
     },
+    getEditionInsights: function (editionSlug) {
+      return call("getEditionInsights", { editionSlug: editionSlug });
+    },
+    getEditionAwards: function (editionSlug) {
+      return call("getEditionAwards", { editionSlug: editionSlug });
+    },
+    adminGetEditionPhaseState: function (editionSlug) {
+      return call("adminGetEditionPhaseState", { editionSlug: editionSlug });
+    },
+    // 仅传届别；下一阶段及确认人身份由服务端从当前状态和登录会话确定。
+    // 同一管理员再次调用会撤销自己的确认。
+    adminConfirmEditionPhase: function (editionSlug) {
+      return call("adminConfirmEditionPhase", { editionSlug: editionSlug });
+    },
+    adminClearEditionPhaseConfirm: function (editionSlug) {
+      return call("adminClearEditionPhaseConfirm", { editionSlug: editionSlug });
+    },
     login: function (qq, pass) {
       return call("login", { qq: qq, pass: pass }).then(function (data) {
         setToken(data.token);
