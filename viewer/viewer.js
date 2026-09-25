@@ -2275,6 +2275,9 @@
 
   /* ---------- 评论 ---------- */
 
+  var openReplyRemainders = Object.create(null);
+  var activeReplyComposer = "";
+
   function commentsOf(id) {
     return store.comments[id] || [];
   }
@@ -2903,6 +2906,7 @@
 
     var panel = el("div", "auth-panel");
     card.appendChild(panel);
+    var authRecoveryTimer = null;
 
     function appendAuthField(form, labelText, input, id) {
       var field = el("label", "auth-field");
@@ -2914,6 +2918,10 @@
     }
 
     function showLogin() {
+      if (authRecoveryTimer) {
+        window.clearInterval(authRecoveryTimer);
+        authRecoveryTimer = null;
+      }
       tabLogin.classList.add("is-active");
       tabReg.classList.remove("is-active");
       clear(panel);
@@ -2997,6 +3005,239 @@
           "首次使用请点上面的「注册」：QQ 需在名单内，验证码会发到你的 QQ 邮箱。",
         ),
       );
+      if (USE_CLOUD) {
+        var forgot = el("button", "btn-ghost auth-forgot", "忘记密码？");
+        forgot.type = "button";
+        forgot.addEventListener("click", function () {
+          showForgotPassword(qq.value.trim());
+        });
+        panel.appendChild(forgot);
+      }
+    }
+
+    function showForgotPassword(prefillQQ) {
+      var recovery = {
+        qq: String(prefillQQ || ""),
+        cooldown: 0,
+        timer: null,
+        code: "",
+        password: "",
+        password2: "",
+      };
+
+      function clearTimer() {
+        if (recovery.timer) {
+          window.clearInterval(recovery.timer);
+          if (authRecoveryTimer === recovery.timer) authRecoveryTimer = null;
+          recovery.timer = null;
+        }
+      }
+
+      function showRequestStep() {
+        clearTimer();
+        clear(panel);
+        var form = el("form", "auth-form");
+        var qq = el("input", "auth-input");
+        qq.type = "text";
+        qq.placeholder = "QQ 号";
+        qq.inputMode = "numeric";
+        qq.autocomplete = "username";
+        qq.required = true;
+        qq.value = recovery.qq;
+        var err = el("p", "auth-error");
+        err.setAttribute("aria-live", "polite");
+        var send = el("button", "btn", "发送验证码");
+        send.type = "submit";
+        appendAuthField(form, "QQ 号", qq, "reset-qq");
+        form.appendChild(err);
+        form.appendChild(send);
+        form.addEventListener("submit", function (event) {
+          event.preventDefault();
+          var id = qq.value.trim();
+          if (!/^\d{5,12}$/.test(id)) {
+            err.textContent = "请输入 5–12 位数字 QQ 号。";
+            return;
+          }
+          recovery.qq = id;
+          send.disabled = true;
+          send.textContent = "发送中…";
+          window.MythosAPI.requestPasswordReset(id)
+            .then(function (data) {
+              recovery.cooldown = Number(data && data.retryAfterSeconds) || 60;
+              showResetStep((data && data.message) || "若账号存在且可找回，验证码将发送至其 QQ 邮箱。请检查收件箱和垃圾邮件。");
+            })
+            .catch(function (e) {
+              err.textContent = e.message || String(e);
+              send.disabled = false;
+              send.textContent = "发送验证码";
+            });
+        });
+        panel.appendChild(form);
+        panel.appendChild(
+          el(
+            "p",
+            "auth-hint",
+            "若账号存在且可找回，验证码将发送至其 QQ 邮箱。请检查收件箱和垃圾邮件。",
+          ),
+        );
+        var back = el("button", "btn-ghost auth-forgot", "返回登录");
+        back.type = "button";
+        back.addEventListener("click", showLogin);
+        panel.appendChild(back);
+      }
+
+      function showResetStep(notice) {
+        clear(panel);
+        var heading = el("p", "auth-hint", notice);
+        heading.setAttribute("role", "status");
+        panel.appendChild(heading);
+        var form = el("form", "auth-form");
+        var code = el("input", "auth-input");
+        code.type = "text";
+        code.inputMode = "numeric";
+        code.autocomplete = "one-time-code";
+        code.maxLength = 8;
+        code.placeholder = "8 位验证码";
+        code.required = true;
+        code.value = recovery.code;
+        code.addEventListener("input", function () {
+          recovery.code = code.value;
+        });
+        var password = el("input", "auth-input");
+        password.type = "password";
+        password.autocomplete = "new-password";
+        password.maxLength = 256;
+        password.placeholder = "新密码（至少 4 位）";
+        password.required = true;
+        password.value = recovery.password;
+        password.addEventListener("input", function () {
+          recovery.password = password.value;
+        });
+        var password2 = el("input", "auth-input");
+        password2.type = "password";
+        password2.autocomplete = "new-password";
+        password2.maxLength = 256;
+        password2.placeholder = "再次输入新密码";
+        password2.required = true;
+        password2.value = recovery.password2;
+        password2.addEventListener("input", function () {
+          recovery.password2 = password2.value;
+        });
+        var err = el("p", "auth-error");
+        err.setAttribute("aria-live", "polite");
+        var submit = el("button", "btn", "重置密码");
+        submit.type = "submit";
+        form.appendChild(el("p", "auth-recovery-account", "账号 QQ " + recovery.qq));
+        appendAuthField(form, "验证码", code, "reset-code");
+        appendAuthField(form, "新密码", password, "reset-new-password");
+        appendAuthField(form, "确认新密码", password2, "reset-confirm-password");
+        form.appendChild(err);
+        form.appendChild(submit);
+        form.addEventListener("submit", function (event) {
+          event.preventDefault();
+          err.textContent = "";
+          recovery.code = code.value.trim();
+          recovery.password = password.value;
+          recovery.password2 = password2.value;
+          if (!/^\d{8}$/.test(recovery.code)) {
+            err.textContent = "请输入 8 位数字验证码。";
+            return;
+          }
+          if (recovery.password.length < 4 || recovery.password.length > 256) {
+            err.textContent = "新密码需为 4–256 个字符。";
+            return;
+          }
+          if (recovery.password !== recovery.password2) {
+            err.textContent = "两次输入的新密码不一致。";
+            return;
+          }
+          submit.disabled = true;
+          submit.textContent = "正在重置…";
+          window.MythosAPI.resetPassword(recovery.qq, recovery.code, recovery.password)
+            .then(function () {
+              clearTimer();
+              window.MythosAPI.setToken("");
+              store.session = null;
+              clearCloudCaches();
+              recovery.code = "";
+              recovery.password = "";
+              recovery.password2 = "";
+              clear(panel);
+              panel.appendChild(el("p", "auth-ok", "密码已重置，旧登录会话已失效。请使用新密码登录。"));
+              var back = el("button", "btn", "返回登录");
+              back.type = "button";
+              back.addEventListener("click", showLogin);
+              panel.appendChild(back);
+            })
+            .catch(function (e) {
+              err.textContent = e.message || String(e);
+              submit.disabled = false;
+              submit.textContent = "重置密码";
+            });
+        });
+        panel.appendChild(form);
+
+        var actions = el("div", "auth-recovery-actions");
+        var resend = el("button", "btn-ghost", "重新发送验证码");
+        resend.type = "button";
+        var changeQQ = el("button", "btn-ghost", "修改 QQ 号");
+        changeQQ.type = "button";
+        changeQQ.addEventListener("click", function () {
+          recovery.code = "";
+          recovery.password = "";
+          recovery.password2 = "";
+          showRequestStep();
+        });
+        actions.appendChild(resend);
+        actions.appendChild(changeQQ);
+        panel.appendChild(actions);
+
+        function updateResendLabel() {
+          if (recovery.cooldown > 0) {
+            resend.disabled = true;
+            resend.textContent = "重新发送（" + recovery.cooldown + " 秒）";
+          } else {
+            resend.disabled = false;
+            resend.textContent = "重新发送验证码";
+          }
+        }
+        function countDown() {
+          if (recovery.cooldown <= 0) {
+            clearTimer();
+            updateResendLabel();
+            return;
+          }
+          recovery.cooldown -= 1;
+          updateResendLabel();
+        }
+        updateResendLabel();
+        if (recovery.cooldown > 0 && !recovery.timer) {
+          recovery.timer = window.setInterval(countDown, 1000);
+          authRecoveryTimer = recovery.timer;
+        }
+        resend.addEventListener("click", function () {
+          if (recovery.cooldown > 0) return;
+          resend.disabled = true;
+          resend.textContent = "发送中…";
+          window.MythosAPI.requestPasswordReset(recovery.qq)
+            .then(function (data) {
+              recovery.cooldown = Number(data && data.retryAfterSeconds) || 60;
+              heading.textContent = (data && data.message) || notice;
+              countDown();
+              if (recovery.cooldown > 0 && !recovery.timer) {
+                recovery.timer = window.setInterval(countDown, 1000);
+                authRecoveryTimer = recovery.timer;
+              }
+            })
+            .catch(function (e) {
+              heading.textContent = e.message || String(e);
+              resend.disabled = false;
+              resend.textContent = "重新发送验证码";
+            });
+        });
+      }
+
+      showRequestStep();
     }
 
     // 云端注册：QQ 邮箱验证码两步式
@@ -3210,6 +3451,10 @@
     }
 
     function showReg(prefill) {
+      if (authRecoveryTimer) {
+        window.clearInterval(authRecoveryTimer);
+        authRecoveryTimer = null;
+      }
       prefill = prefill || {};
       tabReg.classList.add("is-active");
       tabLogin.classList.remove("is-active");
@@ -4173,28 +4418,172 @@
     window.MythosAPI.call("adminGetReport").then(function (report) {
       var body = el("div", "modal-body");
       var summary = report.summary || {};
-      body.appendChild(el("p", "modal-meta", "账号 " + (summary.users || 0) + "（启用 " + (summary.enabledUsers || 0) + "） · 评分 " + (summary.ratings || 0) + " · 评论 " + (summary.comments || 0)));
+      var summaryLine = el("p", "modal-meta");
+      body.appendChild(summaryLine);
       body.appendChild(el("h3", "modal-sub", "作品评分与热度"));
+
+      function editionYear(edition) {
+        var year = Number(edition && edition.year);
+        if (isFinite(year) && year) return year;
+        var match = String(edition && edition.slug || "").match(/\d{4}/);
+        return match ? Number(match[0]) : 0;
+      }
+
+      var editionChoices = (editions || []).slice();
+      var knownEditionSlugs = Object.create(null);
+      editionChoices.forEach(function (edition) {
+        knownEditionSlugs[edition.slug] = true;
+      });
+      (report.workStats || []).forEach(function (row) {
+        var slug = String(row.workId || "").split("/")[0];
+        if (slug && !knownEditionSlugs[slug]) {
+          knownEditionSlugs[slug] = true;
+          editionChoices.push({ slug: slug, shortName: slug });
+        }
+      });
+      editionChoices.sort(function (a, b) {
+        return editionYear(a) - editionYear(b) || String(a.slug).localeCompare(String(b.slug), undefined, { numeric: true });
+      });
+      var selectedEdition = editionChoices.length
+        ? editionChoices[editionChoices.length - 1].slug
+        : "__all__";
+
+      function editionForRow(row) {
+        return String(row && row.workId || "").split("/")[0];
+      }
+
+      function rowsForSelection(rows) {
+        return (rows || []).filter(function (row) {
+          return selectedEdition === "__all__" || editionForRow(row) === selectedEdition;
+        });
+      }
+
+      var controls = el("div", "report-filters");
+      var editionField = el("label", "report-filter");
+      editionField.appendChild(el("span", "field-label", "届次"));
+      var editionSelect = el("select", "auth-input");
+      editionSelect.setAttribute("aria-label", "筛选届次");
+      var allOption = el("option", null, "全部届次");
+      allOption.value = "__all__";
+      editionSelect.appendChild(allOption);
+      editionChoices.slice().reverse().forEach(function (edition) {
+        var option = el("option", null, edition.shortName || edition.name || edition.slug);
+        option.value = edition.slug;
+        editionSelect.appendChild(option);
+      });
+      editionSelect.value = selectedEdition;
+      editionField.appendChild(editionSelect);
+      controls.appendChild(editionField);
+
+      var sortField = el("label", "report-filter");
+      sortField.appendChild(el("span", "field-label", "排序"));
+      var sortSelect = el("select", "auth-input");
+      sortSelect.setAttribute("aria-label", "作品热度排序");
+      [
+        ["comments-desc", "评论数：从多到少"],
+        ["comments-asc", "评论数：从少到多"],
+        ["ratings-desc", "评分人数：从多到少"],
+        ["ratings-asc", "评分人数：从少到多"],
+        ["average-desc", "综合均分：从高到低"],
+        ["average-asc", "综合均分：从低到高"],
+        ["work-asc", "作品编号：升序"],
+        ["work-desc", "作品编号：降序"],
+      ].forEach(function (item) {
+        var option = el("option", null, item[1]);
+        option.value = item[0];
+        sortSelect.appendChild(option);
+      });
+      sortSelect.value = "comments-desc";
+      sortField.appendChild(sortSelect);
+      controls.appendChild(sortField);
+      body.appendChild(controls);
+
       var table = el("table", "rank-table");
       var head = el("tr");
       ["作品", "评分", "综合均分", "评论"].forEach(function (label) { head.appendChild(el("th", null, label)); });
       var thead = el("thead"); thead.appendChild(head); table.appendChild(thead);
       var tbody = el("tbody");
-      (report.workStats || []).slice().sort(function (a, b) { return b.commentCount - a.commentCount; }).forEach(function (row) {
-        var tr = el("tr");
-        [row.workId, row.ratingCount, row.totalAvg == null ? "—" : Number(row.totalAvg).toFixed(2), row.commentCount].forEach(function (value) { tr.appendChild(el("td", null, String(value))); });
-        tbody.appendChild(tr);
-      });
       table.appendChild(tbody); body.appendChild(table);
-      var tools = el("div", "admin-row");
-      function addExport(label, filename, headers, rows) {
-        var button = el("button", "btn-ghost", label); button.type = "button";
-        button.addEventListener("click", function () { downloadCsv(filename, headers, rows); }); tools.appendChild(button);
+
+      function compareWorkIds(a, b) {
+        return String(a.workId || "").localeCompare(String(b.workId || ""), undefined, { numeric: true });
       }
-      addExport("导出评分明细", "幻梦境-评分明细.csv", ["作品", "评分者QQ", "传录", "档案", "综合", "评分时间"], (report.ratings || []).map(function (r) { return [r.workId, r.qq, r.chuanlu, r.dangan, r.overall, r.t]; }));
-      addExport("导出评分汇总", "幻梦境-评分汇总.csv", ["作品", "评分人数", "传录均分", "档案均分", "综合均分", "总平均分", "评论数"], (report.workStats || []).map(function (r) { return [r.workId, r.ratingCount, r.chuanluAvg, r.danganAvg, r.overallAvg, r.totalAvg, r.commentCount]; }));
-      addExport("导出评论明细", "幻梦境-评论明细.csv", ["作品", "QQ", "昵称", "匿名", "评委", "评论", "发表时间", "编辑时间"], (report.comments || []).map(function (r) { return [r.workId, r.qq, r.name, r.anonymous ? "是" : "否", r.judge ? "是" : "否", r.body, r.t, r.editedAt]; }));
+
+      function sortedWorkStats() {
+        var rows = rowsForSelection(report.workStats).slice();
+        var sortMode = sortSelect.value;
+        rows.sort(function (a, b) {
+          var value = 0;
+          if (sortMode === "work-asc" || sortMode === "work-desc") {
+            value = compareWorkIds(a, b);
+            return sortMode === "work-desc" ? -value : value;
+          }
+          var field = sortMode.indexOf("comments-") === 0
+            ? "commentCount"
+            : sortMode.indexOf("ratings-") === 0 ? "ratingCount" : "totalAvg";
+          var av = a[field] == null ? null : Number(a[field]);
+          var bv = b[field] == null ? null : Number(b[field]);
+          var aMissing = av == null || !isFinite(av);
+          var bMissing = bv == null || !isFinite(bv);
+          if (aMissing || bMissing) return aMissing === bMissing ? compareWorkIds(a, b) : aMissing ? 1 : -1;
+          value = av - bv;
+          if (sortMode.endsWith("-desc")) value = -value;
+          return value || compareWorkIds(a, b);
+        });
+        return rows;
+      }
+
+      function updateReportView() {
+        while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+        var rows = sortedWorkStats();
+        if (!rows.length) {
+          var empty = el("tr");
+          var emptyCell = el("td", "modal-meta", "所选届次暂无评分或评论数据。");
+          emptyCell.colSpan = 4;
+          empty.appendChild(emptyCell);
+          tbody.appendChild(empty);
+        } else {
+          rows.forEach(function (row) {
+            var tr = el("tr");
+            [row.workId, row.ratingCount, row.totalAvg == null ? "—" : Number(row.totalAvg).toFixed(2), row.commentCount].forEach(function (value) {
+              tr.appendChild(el("td", null, String(value)));
+            });
+            tbody.appendChild(tr);
+          });
+        }
+        var edition = editionChoices.filter(function (item) { return item.slug === selectedEdition; })[0];
+        var editionLabel = selectedEdition === "__all__"
+          ? "全部届次"
+          : edition ? (edition.shortName || edition.name || edition.slug) : selectedEdition;
+        summaryLine.textContent = editionLabel + " · 账号 " + (summary.users || 0) + "（启用 " + (summary.enabledUsers || 0) + "） · 评分 " + rowsForSelection(report.ratings).length + " · 评论 " + rowsForSelection(report.comments).length;
+      }
+
+      editionSelect.addEventListener("change", function () {
+        selectedEdition = editionSelect.value;
+        updateReportView();
+      });
+      sortSelect.addEventListener("change", updateReportView);
+
+      var tools = el("div", "admin-row");
+      function addExport(label, suffix, headers, getRows) {
+        var button = el("button", "btn-ghost", label); button.type = "button";
+        button.addEventListener("click", function () {
+          var editionPart = selectedEdition === "__all__" ? "全部届次" : selectedEdition;
+          downloadCsv("幻梦境-" + editionPart + "-" + suffix + ".csv", headers, getRows());
+        });
+        tools.appendChild(button);
+      }
+      addExport("导出评分明细", "评分明细", ["作品", "评分者QQ", "传录", "档案", "综合", "评分时间"], function () {
+        return rowsForSelection(report.ratings).map(function (r) { return [r.workId, r.qq, r.chuanlu, r.dangan, r.overall, r.t]; });
+      });
+      addExport("导出评分汇总", "评分汇总", ["作品", "评分人数", "传录均分", "档案均分", "综合均分", "总平均分", "评论数"], function () {
+        return sortedWorkStats().map(function (r) { return [r.workId, r.ratingCount, r.chuanluAvg, r.danganAvg, r.overallAvg, r.totalAvg, r.commentCount]; });
+      });
+      addExport("导出评论明细", "评论明细", ["作品", "QQ", "昵称", "匿名", "评委", "评论", "发表时间", "编辑时间"], function () {
+        return rowsForSelection(report.comments).map(function (r) { return [r.workId, r.qq, r.name, r.anonymous ? "是" : "否", r.judge ? "是" : "否", r.body, r.t, r.editedAt]; });
+      });
       body.appendChild(tools);
+      updateReportView();
       openModal("数据与导出", body);
     }).catch(function (err) {
       loading.appendChild(el("p", "auth-error", err.message || String(err)));
@@ -5812,7 +6201,9 @@
     if (showJudgeBox() && judgeComments.length) {
       var judgeBox = el("div", "judge-box");
       judgeBox.appendChild(el("div", "judge-box-title", "评委评价"));
-      judgeComments.forEach(function (comment) {
+      judgeComments.filter(function (comment) {
+        return !comment.rootId;
+      }).forEach(function (comment) {
         judgeBox.appendChild(renderCommentItem(comment, id, panel, true));
       });
       panel.appendChild(judgeBox);
@@ -5828,12 +6219,15 @@
       showJudgeBox() && judgeComments.length
         ? normalComments
         : judgeComments.concat(normalComments);
+    var rootComments = showList.filter(function (comment) {
+      return !comment.rootId;
+    });
 
-    if (!showList.length && !(showJudgeBox() && judgeComments.length)) {
+    if (!rootComments.length && !(showJudgeBox() && judgeComments.length)) {
       panel.appendChild(el("p", "comment-empty", "还没有评论。"));
-    } else if (showList.length) {
+    } else if (rootComments.length) {
       var ul = el("ul", "comment-list");
-      showList.forEach(function (comment) {
+      rootComments.forEach(function (comment) {
         ul.appendChild(renderCommentItem(comment, id, panel, false));
       });
       panel.appendChild(ul);
@@ -5841,10 +6235,10 @@
     return panel;
   }
 
-  function renderCommentItem(comment, id, panel, inJudgeBox) {
+  function renderCommentItem(comment, id, panel, inJudgeBox, isReply) {
     var li = el(
-      inJudgeBox ? "div" : "li",
-      inJudgeBox ? "judge-item" : "comment-item",
+      inJudgeBox ? "div" : isReply ? "article" : "li",
+      inJudgeBox ? "judge-item" : isReply ? "comment-reply" : "comment-item",
     );
     var head = el("div", "comment-head");
     var author = comment.qq ? store.users[comment.qq] : null;
@@ -5860,8 +6254,12 @@
     );
 
     var user = currentUser();
-    var canEdit = isAdmin() || (user && comment.qq && comment.qq === user.qq);
-    var bodyNode = el("p", "comment-body", comment.body);
+    var canEdit = !comment.deleted && (isAdmin() || (user && comment.qq && comment.qq === user.qq));
+    var bodyNode = el(
+      "p",
+      "comment-body" + (comment.deleted ? " comment-deleted" : ""),
+      comment.deleted ? (isReply ? "该回复已删除。" : "该评论已删除。") : comment.body,
+    );
 
     function afterCommentChange() {
       return loadCloudWorkBundle(id, true).then(function () {
@@ -5942,9 +6340,21 @@
             });
           return;
         }
-        store.comments[id] = commentsOf(id).filter(function (item) {
-          return item.id !== comment.id;
+        var hasReplies = !isReply && commentsOf(id).some(function (item) {
+          return item.rootId === comment.id;
         });
+        store.comments[id] = hasReplies
+          ? commentsOf(id).map(function (item) {
+              if (item.id !== comment.id) return item;
+              return Object.assign({}, item, {
+                body: "",
+                deleted: true,
+                deletedAt: new Date().toISOString(),
+              });
+            })
+          : commentsOf(id).filter(function (item) {
+              return item.id !== comment.id;
+            });
         persist();
         panel.parentNode.replaceChild(renderCommentPanel(id), panel);
       });
@@ -5952,7 +6362,149 @@
     }
     li.appendChild(head);
     li.appendChild(bodyNode);
+
+    if (!isReply) {
+      var replies = commentsOf(id).filter(function (item) {
+        return item.rootId === comment.id;
+      });
+      var threadKey = id + "::" + comment.id;
+      if (!comment.deleted && canInteract()) {
+        var actions = el("div", "comment-actions");
+        var replyButton = el("button", "comment-reply-action", "回复");
+        replyButton.type = "button";
+        replyButton.addEventListener("click", function () {
+          activeReplyComposer = activeReplyComposer === threadKey ? "" : threadKey;
+          panel.parentNode.replaceChild(renderCommentPanel(id), panel);
+        });
+        actions.appendChild(replyButton);
+        li.appendChild(actions);
+      }
+      if (replies.length) {
+        var thread = el("div", "comment-thread");
+        var repliesList = el("div", "comment-replies");
+        repliesList.appendChild(renderCommentItem(replies[0], id, panel, false, true));
+        if (replies.length > 1) {
+          var openRemainder = !!openReplyRemainders[threadKey];
+          var remainder = el("div", "comment-reply-more");
+          remainder.id = "comment-replies-" + comment.id + "-remaining";
+          remainder.hidden = !openRemainder;
+          replies.slice(1).forEach(function (reply) {
+            remainder.appendChild(renderCommentItem(reply, id, panel, false, true));
+          });
+          var toggle = el(
+            "button",
+            "comment-thread-toggle",
+            (openRemainder ? "收起" : "展开") + "其余 " + (replies.length - 1) + " 条回复",
+          );
+          toggle.type = "button";
+          toggle.setAttribute("aria-expanded", openRemainder ? "true" : "false");
+          toggle.setAttribute("aria-controls", remainder.id);
+          toggle.addEventListener("click", function () {
+            openReplyRemainders[threadKey] = !openReplyRemainders[threadKey];
+            panel.parentNode.replaceChild(renderCommentPanel(id), panel);
+          });
+          repliesList.appendChild(toggle);
+          repliesList.appendChild(remainder);
+        }
+        thread.appendChild(repliesList);
+        li.appendChild(thread);
+      }
+      if (!comment.deleted && activeReplyComposer === threadKey && canInteract()) {
+        li.appendChild(renderReplyForm(id, comment, panel));
+      }
+    }
     return li;
+  }
+
+  function renderReplyForm(id, rootComment, panel) {
+    var form = el("form", "comment-form comment-reply-form");
+    var rootAuthor = rootComment.anonymous
+      ? "匿名"
+      : rootComment.name || "用户";
+    form.appendChild(el("p", "comment-replying-to", "回复主评论 · " + rootAuthor));
+    var textarea = el("textarea", "comment-input");
+    textarea.placeholder = "回复这条主评论…";
+    textarea.maxLength = BODY_MAX;
+    form.appendChild(textarea);
+    fitCommentTextarea(textarea);
+
+    var tools = el("div", "comment-tools");
+    var anonWrap = el("label", "checkbox");
+    var anon = document.createElement("input");
+    anon.type = "checkbox";
+    anonWrap.appendChild(anon);
+    anonWrap.appendChild(el("span", null, "匿名"));
+    tools.appendChild(anonWrap);
+    var counter = el("span", "counter", "0/" + BODY_MAX);
+    tools.appendChild(counter);
+    var cancel = el("button", "btn-ghost btn-tiny", "取消");
+    cancel.type = "button";
+    cancel.addEventListener("click", function () {
+      activeReplyComposer = "";
+      panel.parentNode.replaceChild(renderCommentPanel(id), panel);
+    });
+    tools.appendChild(cancel);
+    var submit = el("button", "btn btn-tiny", "回复");
+    submit.type = "submit";
+    submit.disabled = true;
+    tools.appendChild(submit);
+    textarea.addEventListener("input", function () {
+      counter.textContent = textarea.value.length + "/" + BODY_MAX;
+      submit.disabled = !textarea.value.trim();
+    });
+
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      if (!canInteract()) return;
+      var body = textarea.value.trim();
+      if (!body) return;
+      var user = currentUser();
+      if (USE_CLOUD) {
+        var commentSubmitted = false;
+        submit.disabled = true;
+        window.MythosAPI.call("addComment", {
+          workId: id,
+          replyToId: rootComment.id,
+          body: body,
+          anonymous: !!anon.checked,
+        })
+          .then(function () {
+            commentSubmitted = true;
+            activeReplyComposer = "";
+            notifyWitch("comment-success");
+            return loadCloudWorkBundle(id, true);
+          })
+          .then(function () {
+            panel.parentNode.replaceChild(renderCommentPanel(id), panel);
+          })
+          .catch(function (e) {
+            alert(e.message || String(e));
+            submit.disabled = false;
+            if (!commentSubmitted) notifyWitch("comment-failure");
+          });
+        return;
+      }
+      var list = commentsOf(id).slice();
+      list.push({
+        id: newId(),
+        workId: id,
+        rootId: rootComment.id,
+        qq: user.qq,
+        name: displayName(user),
+        anonymous: !!anon.checked,
+        judge: false,
+        body: body.slice(0, BODY_MAX),
+        t: new Date().toISOString(),
+      });
+      store.comments[id] = list;
+      activeReplyComposer = "";
+      persist();
+      panel.parentNode.replaceChild(renderCommentPanel(id), panel);
+      notifyWitch("comment-success");
+    });
+
+    form.appendChild(tools);
+    return form;
   }
 
   function renderCommentForm(id, panel) {

@@ -88,13 +88,18 @@ function renderBody(body) {
       .replace(/\s*\{\s*toc\s*\}\s*$/i, "")
       .replace(/<[^>]+>/g, "")
       .trim();
-    const id = slugify(plain, used);
+    const sectionTitle = plain
+      .replace(/&(?:emsp|ensp|nbsp);/gi, " ")
+      .replace(/&#(?:8194|8195|160);/gi, " ")
+      .replace(/&#x(?:2002|2003|00a0);/gi, " ")
+      .trim();
+    const id = slugify(sectionTitle, used);
     let title = this.parser.parseInline(token.tokens);
     title = title.replace(/\s*\{\s*toc\s*\}\s*$/i, "").trim();
 
     // 二级标题默认入索引；更细的标题需显式 {toc}
     if (token.depth === 2 || (token.depth >= 3 && flagged)) {
-      sections.push({ id, title: plain, level: token.depth });
+      sections.push({ id, title: sectionTitle, level: token.depth });
     }
     return `<h${token.depth} id="${id}">${title}</h${token.depth}>\n`;
   };

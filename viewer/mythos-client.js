@@ -113,6 +113,12 @@
     sendRegisterCode: function (qq) {
       return call("sendRegisterCode", { qq: qq });
     },
+    requestPasswordReset: function (qq) {
+      return call("requestPasswordReset", { qq: qq });
+    },
+    resetPassword: function (qq, code, newPassword) {
+      return call("resetPassword", { qq: qq, code: code, newPassword: newPassword });
+    },
     visitor: function () {
       return call("visitor").then(function (data) {
         setToken(data.token);

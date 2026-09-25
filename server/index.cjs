@@ -56,6 +56,12 @@ const CODE_SEND_PER_IP_MINUTE = 5;
 const CODE_SEND_PER_IP_HOUR = 30;
 const CODE_SEND_GLOBAL_DAILY = Math.max(1, parseInt(process.env.SMTP_DAILY_LIMIT || "200", 10));
 const VERIFY_RETENTION_MS = 24 * 3600 * 1000;
+const RESET_CODE_MAX_ATTEMPTS = 5;
+const RESET_CODE_SEND_PER_QQ_HOUR = 5;
+const RESET_CODE_SEND_PER_IP_MINUTE = 5;
+const RESET_CODE_SEND_PER_IP_HOUR = 30;
+const RESET_CODE_MAX_FAILURES_PER_QQ_HOUR = 10;
+const RESET_CODE_MAX_FAILURES_PER_IP_HOUR = 30;
 
 // 正文在线编辑
 const WORK_BODY_MAX = 300000;
@@ -157,12 +163,14 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS comments (
     id TEXT PRIMARY KEY,
     workId TEXT NOT NULL,
+    rootId TEXT,
     qq TEXT NOT NULL,
     name TEXT NOT NULL,
     anonymous INTEGER NOT NULL DEFAULT 0,
     judge INTEGER NOT NULL DEFAULT 0,
     body TEXT NOT NULL,
-    t TEXT NOT NULL
+    t TEXT NOT NULL,
+    deletedAt TEXT
   );
 
   CREATE TABLE IF NOT EXISTS stars (
@@ -195,6 +203,24 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_email_verifications_created
     ON email_verifications(created_at);
+
+  CREATE TABLE IF NOT EXISTS password_reset_verifications (
+    id TEXT PRIMARY KEY,
+    qq TEXT NOT NULL,
+    code_hash TEXT NOT NULL DEFAULT '',
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    used_at INTEGER,
+    verify_attempts INTEGER NOT NULL DEFAULT 0,
+    request_ip TEXT,
+    sent_at INTEGER
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_password_reset_verifications_qq
+    ON password_reset_verifications(qq, created_at);
+
+  CREATE INDEX IF NOT EXISTS idx_password_reset_verifications_ip
+    ON password_reset_verifications(request_ip, created_at);
 
   CREATE TABLE IF NOT EXISTS work_content (
     workId TEXT PRIMARY KEY,
@@ -247,6 +273,17 @@ db.exec(`
     return c.name === "editedAt";
   });
   if (!hasEdited) db.exec("ALTER TABLE comments ADD COLUMN editedAt TEXT");
+})();
+
+(function migrateCommentThreads() {
+  const cols = db.prepare("PRAGMA table_info(comments)").all();
+  if (!cols.some((col) => col.name === "rootId")) {
+    db.exec("ALTER TABLE comments ADD COLUMN rootId TEXT");
+  }
+  if (!cols.some((col) => col.name === "deletedAt")) {
+    db.exec("ALTER TABLE comments ADD COLUMN deletedAt TEXT");
+  }
+  db.exec("CREATE INDEX IF NOT EXISTS idx_comments_work_root_time ON comments(workId, rootId, t, id)");
 })();
 
 // 密码加密（使用标准 scrypt）
@@ -1050,6 +1087,37 @@ async function sendVerificationMail(qq, code) {
   });
 }
 
+async function sendPasswordResetMail(qq, code) {
+  const t = await getTransporter();
+  if (!t) throw new Error("邮件服务尚未配置");
+  const minutes = Math.round(CODE_TTL_MS / 60000);
+  const summary = "密码找回验证码：" + code + "（" + minutes + " 分钟内有效）";
+  const text = [
+    summary,
+    "",
+    "请在幻梦境档案馆的密码找回页面输入此验证码。",
+    "如果不是你本人操作，请忽略此邮件。",
+  ].join("\n");
+  const html = [
+    '<!doctype html><html lang="zh-CN"><body style="margin:0;padding:24px;background:#f5f3ef;color:#292522;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Microsoft YaHei\',sans-serif;">',
+    '<main style="max-width:520px;margin:0 auto;padding:32px;background:#fffdf9;border:1px solid #e5dfd7;border-radius:12px;">',
+    '<p style="margin:0 0 8px;color:#9a4a39;font-size:13px;letter-spacing:.12em;">幻梦境档案馆</p>',
+    '<h1 style="margin:0 0 20px;font-size:24px;line-height:1.35;">密码找回验证码</h1>',
+    '<p style="margin:0 0 14px;font-size:16px;line-height:1.7;">请在密码找回页面输入以下验证码：</p>',
+    '<div style="margin:0 0 16px;padding:16px 20px;border:1px solid #d8c7bb;border-radius:8px;background:#f8f3ed;color:#9a4a39;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:32px;font-weight:700;letter-spacing:.16em;text-align:center;">' + code + '</div>',
+    '<p style="margin:0 0 20px;font-size:15px;line-height:1.7;"><strong>有效期：</strong>' + minutes + ' 分钟</p>',
+    '<p style="margin:0;padding-top:16px;border-top:1px solid #eee7df;color:#706a64;font-size:13px;line-height:1.7;">如果不是你本人操作，请忽略此邮件。此验证码只用于重置密码。</p>',
+    '</main></body></html>',
+  ].join("");
+  await t.sendMail({
+    from: '"' + SMTP_CONFIG.fromName + '" <' + SMTP_CONFIG.user + ">",
+    to: qq + "@qq.com",
+    subject: "幻梦境档案馆密码找回验证码",
+    text,
+    html,
+  });
+}
+
 // 清理过期验证码记录（保留一天便于排查）
 function pruneVerifications() {
   try {
@@ -1356,6 +1424,163 @@ async function handle(action, payload, auth, ctx) {
       };
     }
 
+    case "requestPasswordReset": {
+      const qq = String(payload.qq || "").trim();
+      if (!/^\d{5,12}$/.test(qq)) throw new Error("请输入 5–12 位数字 QQ 号。");
+
+      const now = Date.now();
+      const retryAfterSeconds = Math.round(CODE_RESEND_COOLDOWN_MS / 1000);
+      const genericResponse = {
+        message: "若账号存在且可找回，验证码将发送至其 QQ 邮箱。请检查收件箱和垃圾邮件。",
+        retryAfterSeconds,
+      };
+      const last = db
+        .prepare("SELECT created_at FROM password_reset_verifications WHERE qq = ? ORDER BY created_at DESC LIMIT 1")
+        .get(qq);
+      const qqHour = db
+        .prepare("SELECT COUNT(*) AS c FROM password_reset_verifications WHERE qq = ? AND created_at > ?")
+        .get(qq, now - 3600 * 1000).c;
+      const ipMinute = db
+        .prepare("SELECT COUNT(*) AS c FROM password_reset_verifications WHERE request_ip = ? AND created_at > ?")
+        .get(clientIp, now - 60 * 1000).c;
+      const ipHour = db
+        .prepare("SELECT COUNT(*) AS c FROM password_reset_verifications WHERE request_ip = ? AND created_at > ?")
+        .get(clientIp, now - 3600 * 1000).c;
+      const failedQqHour = db
+        .prepare("SELECT COALESCE(SUM(verify_attempts), 0) AS c FROM password_reset_verifications WHERE qq = ? AND created_at > ?")
+        .get(qq, now - 3600 * 1000).c;
+      const failedIpHour = db
+        .prepare("SELECT COALESCE(SUM(verify_attempts), 0) AS c FROM password_reset_verifications WHERE request_ip = ? AND created_at > ?")
+        .get(clientIp, now - 3600 * 1000).c;
+      const registrationDayTotal = db
+        .prepare("SELECT COUNT(*) AS c FROM email_verifications WHERE created_at > ?")
+        .get(now - 24 * 3600 * 1000).c;
+      const resetDayTotal = db
+        .prepare("SELECT COUNT(*) AS c FROM password_reset_verifications WHERE sent_at > ?")
+        .get(now - 24 * 3600 * 1000).c;
+      const cooldownActive = last && now - Number(last.created_at) < CODE_RESEND_COOLDOWN_MS;
+      const requestLimited =
+        cooldownActive ||
+        Number(qqHour) >= RESET_CODE_SEND_PER_QQ_HOUR ||
+        Number(ipMinute) >= RESET_CODE_SEND_PER_IP_MINUTE ||
+        Number(ipHour) >= RESET_CODE_SEND_PER_IP_HOUR ||
+        Number(failedQqHour) >= RESET_CODE_MAX_FAILURES_PER_QQ_HOUR ||
+        Number(failedIpHour) >= RESET_CODE_MAX_FAILURES_PER_IP_HOUR ||
+        Number(registrationDayTotal) + Number(resetDayTotal) >= CODE_SEND_GLOBAL_DAILY;
+
+      if (!requestLimited) {
+        const userExists = getUser(qq);
+        const canSend = !!(userExists && userExists.enabled && mailerConfigured());
+        const generatedCode = String(crypto.randomInt(10000000, 100000000));
+        const code = canSend ? generatedCode : "";
+        const codeHash = hashCode(generatedCode);
+        const id = crypto.randomUUID();
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          db.prepare("UPDATE password_reset_verifications SET used_at = ? WHERE qq = ? AND used_at IS NULL").run(now, qq);
+          db.prepare(`
+            INSERT INTO password_reset_verifications
+              (id, qq, code_hash, expires_at, created_at, used_at, verify_attempts, request_ip, sent_at)
+            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+          `).run(
+            id,
+            qq,
+            code ? codeHash : "",
+            now + CODE_TTL_MS,
+            now,
+            code ? null : now,
+            clientIp,
+            code ? now : null,
+          );
+          db.exec("COMMIT");
+        } catch (err) {
+          try {
+            db.exec("ROLLBACK");
+          } catch (e) {
+            /* ignore */
+          }
+          throw err;
+        }
+
+        if (code) {
+          sendPasswordResetMail(qq, code).catch((err) => {
+            db.prepare("UPDATE password_reset_verifications SET used_at = ? WHERE id = ? AND used_at IS NULL").run(Date.now(), id);
+            console.error("[requestPasswordReset] 邮件发送失败：" + ((err && err.message) || err));
+          });
+        }
+        db.prepare("DELETE FROM password_reset_verifications WHERE created_at < ?").run(now - VERIFY_RETENTION_MS);
+      }
+
+      return genericResponse;
+    }
+
+    case "resetPassword": {
+      const qq = String(payload.qq || "").trim();
+      const code = String(payload.code || "").trim();
+      const newPassword = String(payload.newPassword || "");
+      if (!/^\d{5,12}$/.test(qq)) throw new Error("请输入 5–12 位数字 QQ 号。");
+      if (!/^\d{8}$/.test(code)) throw new Error("请输入 8 位数字验证码。");
+      if (newPassword.length < 4) throw new Error("新密码至少 4 位。");
+      if (newPassword.length > 256) throw new Error("新密码不能超过 256 个字符。");
+
+      let reset = false;
+      let invalid = false;
+      const now = Date.now();
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const challenge = db
+          .prepare("SELECT id, code_hash, expires_at, used_at, verify_attempts FROM password_reset_verifications WHERE qq = ? AND used_at IS NULL ORDER BY created_at DESC LIMIT 1")
+          .get(qq);
+        if (
+          !challenge ||
+          !challenge.code_hash ||
+          Number(challenge.expires_at) <= now ||
+          Number(challenge.verify_attempts) >= RESET_CODE_MAX_ATTEMPTS
+        ) {
+          if (challenge && challenge.id) {
+            db.prepare("UPDATE password_reset_verifications SET used_at = ? WHERE id = ?").run(now, challenge.id);
+          }
+          invalid = true;
+        } else if (!verifyCode(code, challenge.code_hash)) {
+          const attempts = Number(challenge.verify_attempts) + 1;
+          const accountFailures = Number(db
+            .prepare("SELECT COALESCE(SUM(verify_attempts), 0) AS c FROM password_reset_verifications WHERE qq = ? AND created_at > ?")
+            .get(qq, now - 3600 * 1000).c) + 1;
+          const ipFailures = Number(db
+            .prepare("SELECT COALESCE(SUM(verify_attempts), 0) AS c FROM password_reset_verifications WHERE request_ip = ? AND created_at > ?")
+            .get(clientIp, now - 3600 * 1000).c) + 1;
+          const exhausted =
+            attempts >= RESET_CODE_MAX_ATTEMPTS ||
+            accountFailures >= RESET_CODE_MAX_FAILURES_PER_QQ_HOUR ||
+            ipFailures >= RESET_CODE_MAX_FAILURES_PER_IP_HOUR;
+          db.prepare("UPDATE password_reset_verifications SET verify_attempts = ?, used_at = ? WHERE id = ?")
+            .run(attempts, exhausted ? now : null, challenge.id);
+          invalid = true;
+        } else {
+          const target = getUser(qq);
+          if (!target || !target.enabled) {
+            db.prepare("UPDATE password_reset_verifications SET used_at = ? WHERE id = ?").run(now, challenge.id);
+            invalid = true;
+          } else {
+            db.prepare("UPDATE users SET pass = ? WHERE qq = ?").run(hashPassword(newPassword), qq);
+            db.prepare("UPDATE password_reset_verifications SET used_at = ? WHERE qq = ? AND used_at IS NULL").run(now, qq);
+            db.prepare("DELETE FROM tokens WHERE qq = ?").run(qq);
+            reset = true;
+          }
+        }
+        db.exec("COMMIT");
+      } catch (err) {
+        try {
+          db.exec("ROLLBACK");
+        } catch (e) {
+          /* ignore */
+        }
+        throw err;
+      }
+      if (invalid || !reset) throw new Error("验证码无效或已过期，请重新申请。");
+      return { requireLogin: true };
+    }
+
     case "sendRegisterCode": {
       if (!settings.registrationOpen) throw new Error("管理员已关闭注册。");
       const qq = String(payload.qq || "").trim();
@@ -1392,9 +1617,13 @@ async function handle(action, payload, auth, ctx) {
       if (Number(ipHour) >= CODE_SEND_PER_IP_HOUR) {
         throw new Error("当前网络请求次数过多，请稍后再试。");
       }
-      const dayTotal = db
+      const registrationDayTotal = db
         .prepare("SELECT COUNT(*) AS c FROM email_verifications WHERE created_at > ?")
         .get(now - 24 * 3600 * 1000).c;
+      const resetDayTotal = db
+        .prepare("SELECT COUNT(*) AS c FROM password_reset_verifications WHERE sent_at > ?")
+        .get(now - 24 * 3600 * 1000).c;
+      const dayTotal = Number(registrationDayTotal) + Number(resetDayTotal);
       if (Number(dayTotal) >= CODE_SEND_GLOBAL_DAILY) {
         throw new Error("今日邮件额度已用完，请联系管理员手动开通账号。");
       }
@@ -1578,7 +1807,7 @@ async function handle(action, payload, auth, ctx) {
       }
 
       // 评论获取：匿名评论对非管理员脱敏
-      const rawComments = db.prepare("SELECT id, workId, qq, name, anonymous, judge, body, t, editedAt FROM comments WHERE workId = ? ORDER BY t ASC LIMIT 500").all(workId);
+      const rawComments = db.prepare("SELECT id, workId, rootId, qq, name, anonymous, judge, body, t, editedAt, deletedAt FROM comments WHERE workId = ? ORDER BY t ASC, id ASC LIMIT 1000").all(workId);
       const comments = rawComments.map((c) => {
         const isAnon = !!c.anonymous;
         const isSelf = user && c.qq === user.qq;
@@ -1586,11 +1815,13 @@ async function handle(action, payload, auth, ctx) {
         return {
           id: c.id,
           workId: c.workId,
+          rootId: c.rootId || null,
           qq: isAdmin || isSelf ? c.qq : "",
           name: isAnon && !isAdmin && !isSelf ? "匿名调查员" : c.name,
           anonymous: isAnon,
           judge: !!c.judge,
-          body: c.body,
+          body: c.deletedAt ? "" : c.body,
+          deleted: !!c.deletedAt,
           t: c.t,
           editedAt: c.editedAt || "",
         };
@@ -1781,19 +2012,30 @@ async function handle(action, payload, auth, ctx) {
       const workId = String(payload.workId || "");
       const body = String(payload.body || "").trim().slice(0, BODY_MAX);
       if (!body) throw new Error("评论不能为空");
+      if (!workId) throw new Error("缺少作品编号");
+      const replyToId = String(payload.replyToId || "").trim();
+      let rootId = null;
+      if (replyToId) {
+        const target = db.prepare("SELECT id, workId, rootId, deletedAt FROM comments WHERE id = ?").get(replyToId);
+        if (!target || target.workId !== workId) throw new Error("回复目标不存在或不属于这篇作品。");
+        if (target.rootId) throw new Error("只能回复初始评论，不能回复其他回复。");
+        if (target.deletedAt) throw new Error("该评论已删除，无法回复。");
+        rootId = target.id;
+      }
       const anonymous = !!payload.anonymous;
       const editionSlug = workId.split("/")[0];
       const st = editionState(settings, editionSlug);
-      const judge = session.role === "admin" && st.phase === "统计" && !anonymous;
+      const judge = !rootId && session.role === "admin" && st.phase === "统计" && !anonymous;
       const id = crypto.randomBytes(12).toString("hex");
       const t = new Date().toISOString();
       db.prepare(`
-        INSERT INTO comments (id, workId, qq, name, anonymous, judge, body, t)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, workId, user.qq, user.nickname, anonymous ? 1 : 0, judge ? 1 : 0, body, t);
+        INSERT INTO comments (id, workId, rootId, qq, name, anonymous, judge, body, t)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, workId, rootId, user.qq, user.nickname, anonymous ? 1 : 0, judge ? 1 : 0, body, t);
       const row = {
         id,
         workId,
+        rootId,
         qq: user.qq,
         name: user.nickname,
         anonymous,
@@ -1812,7 +2054,16 @@ async function handle(action, payload, auth, ctx) {
       if (session.role !== "admin" && row.qq !== user.qq) {
         throw new Error("无权删除");
       }
-      db.prepare("DELETE FROM comments WHERE id = ?").run(id);
+      if (!row.rootId) {
+        const replies = db.prepare("SELECT COUNT(*) AS c FROM comments WHERE rootId = ?").get(id).c;
+        if (Number(replies) > 0) {
+          db.prepare("UPDATE comments SET body = '', deletedAt = ? WHERE id = ?").run(new Date().toISOString(), id);
+        } else {
+          db.prepare("DELETE FROM comments WHERE id = ?").run(id);
+        }
+      } else {
+        db.prepare("DELETE FROM comments WHERE id = ?").run(id);
+      }
       return { ok: true };
     }
 
@@ -1822,6 +2073,7 @@ async function handle(action, payload, auth, ctx) {
       const id = String(payload.id || "");
       const row = db.prepare("SELECT * FROM comments WHERE id = ?").get(id);
       if (!row) throw new Error("评论不存在");
+      if (row.deletedAt) throw new Error("已删除的评论不能编辑。");
       if (session.role !== "admin" && row.qq !== user.qq) {
         throw new Error("无权修改");
       }

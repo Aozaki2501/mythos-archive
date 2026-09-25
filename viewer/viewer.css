@@ -1424,6 +1424,78 @@ html[data-theme="dark"] .doc-cool {
   word-break: break-word;
 }
 
+.comment-deleted {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.comment-actions {
+  margin-top: 6px;
+}
+
+.comment-reply-action,
+.comment-thread-toggle {
+  border: 0;
+  padding: 3px 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.comment-thread {
+  margin-top: 6px;
+}
+
+.comment-thread-toggle {
+  color: var(--muted);
+}
+
+.comment-thread-toggle:hover,
+.comment-reply-action:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.comment-replies {
+  display: grid;
+  gap: 10px;
+  margin: 4px 0 0 3px;
+  padding: 4px 0 0 12px;
+  border-left: 1px solid var(--line-strong);
+}
+
+.comment-replies[hidden] {
+  display: none;
+}
+
+.comment-reply-more {
+  display: grid;
+  gap: 10px;
+}
+
+.comment-reply-more[hidden] {
+  display: none;
+}
+
+.comment-reply {
+  min-width: 0;
+  padding: 2px 0 0;
+}
+
+.comment-reply-form {
+  margin: 10px 0 2px 3px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line-strong);
+}
+
+.comment-replying-to {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .comment-delete {
   margin-left: auto;
   border: 0;
@@ -1439,6 +1511,8 @@ html[data-theme="dark"] .doc-cool {
 
 .comment-item:hover .comment-delete,
 .comment-item:focus-within .comment-delete,
+.comment-reply:hover .comment-delete,
+.comment-reply:focus-within .comment-delete,
 .judge-item:hover .comment-delete,
 .judge-item:focus-within .comment-delete {
   opacity: 1;
@@ -2615,6 +2689,28 @@ body.is-authing .mobile-bar {
   line-height: 1.5;
 }
 
+.auth-forgot {
+  display: block;
+  margin: 8px 0 0 auto;
+  padding: 4px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.auth-recovery-account {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.auth-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .auth-code-row {
   display: flex;
   gap: 8px;
@@ -2992,6 +3088,20 @@ textarea:focus-visible,
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.report-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.report-filter {
+  display: grid;
+  flex: 1 1 200px;
+  min-width: 0;
+  gap: 4px;
 }
 
 .admin-check {
