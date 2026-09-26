@@ -74,6 +74,7 @@ const SPOTLIGHT_MIN_COUNT = 1;
 const SPOTLIGHT_DEFAULT_COUNT = 3;
 const SPOTLIGHT_MAX_COUNT = 5;
 const SPOTLIGHT_DEFAULT_TIMEZONE = "Asia/Hong_Kong";
+const READING_GUIDE_IDS = ["first-visit", "ten-minutes", "folk-rites", "case-files", "dreaming-voyages"];
 const CATALOGUE_MANIFEST_PATH = path.join(__dirname, "catalogue.json");
 const RATING_ACHIEVEMENT_TITLES = {
   5: "初次下潜",
@@ -491,6 +492,48 @@ function getSettings() {
 
 function saveSettings(settings) {
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run("main", JSON.stringify(settings));
+}
+
+function normalizeReadingGuides(input) {
+  if (!Array.isArray(input) || input.length !== READING_GUIDE_IDS.length) {
+    throw new Error("请保留五条主题导读路线");
+  }
+  const seen = new Set();
+  return input.map((guide) => {
+    if (!guide || typeof guide !== "object" || Array.isArray(guide)) {
+      throw new Error("主题导读路线无效");
+    }
+    const id = String(guide.id || "");
+    if (!READING_GUIDE_IDS.includes(id) || seen.has(id)) throw new Error("主题导读路线无效或重复");
+    seen.add(id);
+    const title = String(guide.title || "").trim();
+    const audience = String(guide.audience || "").trim();
+    const description = String(guide.description || "").trim();
+    if (!title || title.length > 40 || audience.length > 140 || description.length > 200) {
+      throw new Error("主题导读标题或说明过长");
+    }
+    const workIds = guide.workIds;
+    const reasons = guide.reasons;
+    if (!Array.isArray(workIds) || workIds.length < 1 || workIds.length > 8 ||
+        !Array.isArray(reasons) || reasons.length !== workIds.length) {
+      throw new Error("每条路线需要 1–8 篇作品，且每篇有对应导读语");
+    }
+    const unique = new Set();
+    const cleanIds = workIds.map((value) => {
+      const workId = String(value || "").trim();
+      if (!/^\d{4}\/[^\s/]{1,180}$/.test(workId) || unique.has(workId)) {
+        throw new Error("作品编号无效或在同一路线内重复");
+      }
+      unique.add(workId);
+      return workId;
+    });
+    const cleanReasons = reasons.map((value) => {
+      const reason = String(value || "").trim();
+      if (reason.length > 100) throw new Error("单篇导读语不能超过 100 字");
+      return reason;
+    });
+    return { id, title, audience, description, workIds: cleanIds, reasons: cleanReasons };
+  });
 }
 
 function resolveRole(settings, qq) {
@@ -1630,6 +1673,7 @@ async function handle(action, payload, auth, ctx) {
         registrationOpen: settings.registrationOpen,
         editions: settings.editions || {},
         authorBindings: visibleAuthorBindings,
+        readingGuides: Array.isArray(settings.readingGuides) ? settings.readingGuides : null,
       };
       if (session && session.role === "admin") {
         safeSettings.memberDirectory = settings.memberDirectory || [];
@@ -2847,6 +2891,14 @@ async function handle(action, payload, auth, ctx) {
       `).all().map((row) => row.slug).filter(Boolean);
       const workStats = editionSlugs.flatMap((slug) => reportWorkStats(slug));
       return { summary: reportSummary(), users, ratings, comments, workStats };
+    }
+
+    case "adminSaveReadingGuides": {
+      if (!user || session.role !== "admin") throw new Error("需要管理员");
+      const guides = normalizeReadingGuides(payload.guides);
+      settings.readingGuides = guides;
+      saveSettings(settings);
+      return { guides };
     }
 
     case "adminGetSpotlightConfig": {

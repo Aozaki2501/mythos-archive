@@ -4723,6 +4723,142 @@
     });
   }
 
+  function openReadingGuidesModal() {
+    if (!isAdmin() || !USE_CLOUD) return;
+    var guides = JSON.parse(JSON.stringify(topicGuideCollections()));
+    var defaults = window.ARCHIVE_GUIDES && window.ARCHIVE_GUIDES.collections || [];
+    var choices = [];
+    editions.forEach(function (edition) {
+      if (!isArchivedEdition(edition)) return;
+      (edition.works || []).forEach(function (work) {
+        choices.push({ id: workId(edition.slug, work.slug), label: edition.year + " · " + work.title });
+      });
+    });
+    var body = el("div", "modal-body admin-guides-editor");
+
+    function field(label, value, maxLength, onInput, multiline) {
+      var wrap = el("label", "field-label", label);
+      var input = el(multiline ? "textarea" : "input", "auth-input");
+      if (multiline) input.rows = 2;
+      input.maxLength = maxLength;
+      input.value = value || "";
+      input.addEventListener("input", function () { onInput(input.value); });
+      wrap.appendChild(input);
+      return wrap;
+    }
+
+    function renderEditor() {
+      clear(body);
+      body.appendChild(backToAdminButton());
+      body.appendChild(el("p", "modal-meta", "五条路线由馆员手工编排，不会自动轮换。可以改标题、说明、选读作品、顺序和每篇导读语；保存后访客刷新页面即可看到。"));
+      guides.forEach(function (guide) {
+        var card = el("section", "admin-guide-card");
+        card.appendChild(el("h3", "modal-sub", guide.title));
+        card.appendChild(field("路线标题", guide.title, 40, function (value) { guide.title = value; }));
+        card.appendChild(field("适合谁读", guide.audience, 140, function (value) { guide.audience = value; }, true));
+        card.appendChild(field("路线说明", guide.description, 200, function (value) { guide.description = value; }, true));
+        var rows = el("div", "admin-guide-rows");
+        (guide.workIds || []).forEach(function (id, index) {
+          var item = curatedWorkFromId(id);
+          var row = el("div", "admin-guide-row");
+          row.appendChild(el("span", "admin-guide-no", String(index + 1).padStart(2, "0")));
+          var main = el("div", "admin-guide-row-main");
+          main.appendChild(el("strong", null, item ? item.work.title : id));
+          main.appendChild(field("导读语", guide.reasons[index] || "", 100, function (value) {
+            guide.reasons[index] = value;
+          }));
+          row.appendChild(main);
+          var actions = el("div", "admin-guide-row-actions");
+          [["上移", -1], ["下移", 1]].forEach(function (entry) {
+            var button = el("button", "btn-ghost btn-tiny", entry[0]);
+            button.type = "button";
+            button.disabled = index + entry[1] < 0 || index + entry[1] >= guide.workIds.length;
+            button.addEventListener("click", function () {
+              var next = index + entry[1];
+              [guide.workIds[index], guide.workIds[next]] = [guide.workIds[next], guide.workIds[index]];
+              [guide.reasons[index], guide.reasons[next]] = [guide.reasons[next], guide.reasons[index]];
+              renderEditor();
+            });
+            actions.appendChild(button);
+          });
+          var remove = el("button", "btn-ghost btn-tiny", "移除");
+          remove.type = "button";
+          remove.disabled = guide.workIds.length <= 1;
+          remove.addEventListener("click", function () {
+            guide.workIds.splice(index, 1);
+            guide.reasons.splice(index, 1);
+            renderEditor();
+          });
+          actions.appendChild(remove);
+          row.appendChild(actions);
+          rows.appendChild(row);
+        });
+        card.appendChild(rows);
+        var addRow = el("div", "admin-guide-add");
+        var select = el("select", "auth-input");
+        select.setAttribute("aria-label", "选择要加入「" + guide.title + "」的作品");
+        var placeholder = el("option", null, "选择已封存作品…");
+        placeholder.value = "";
+        select.appendChild(placeholder);
+        choices.forEach(function (choice) {
+          if (guide.workIds.indexOf(choice.id) !== -1) return;
+          var option = el("option", null, choice.label);
+          option.value = choice.id;
+          select.appendChild(option);
+        });
+        addRow.appendChild(select);
+        var add = el("button", "btn-ghost btn-tiny", "加入选读");
+        add.type = "button";
+        add.disabled = guide.workIds.length >= 8;
+        add.addEventListener("click", function () {
+          if (!select.value) return;
+          guide.workIds.push(select.value);
+          guide.reasons.push("");
+          renderEditor();
+        });
+        addRow.appendChild(add);
+        card.appendChild(addRow);
+        body.appendChild(card);
+      });
+      var controls = el("div", "admin-row");
+      var save = el("button", "btn", "保存主题导读");
+      save.type = "button";
+      var status = el("p", "modal-meta");
+      save.addEventListener("click", function () {
+        if (guides.some(function (guide) {
+          return !guide.title.trim() || guide.workIds.some(function (id) { return !curatedWorkFromId(id); });
+        })) {
+          status.textContent = "请填写路线标题，并确认每篇作品仍在已封存目录中。";
+          return;
+        }
+        save.disabled = true;
+        status.textContent = "正在保存…";
+        window.MythosAPI.call("adminSaveReadingGuides", { guides: guides }).then(function (data) {
+          store.settings.readingGuides = data.guides;
+          persist();
+          closeModal();
+          route();
+        }).catch(function (error) {
+          save.disabled = false;
+          status.textContent = error.message || String(error);
+        });
+      });
+      controls.appendChild(save);
+      var reset = el("button", "btn-ghost", "恢复初始编排");
+      reset.type = "button";
+      reset.addEventListener("click", function () {
+        guides = JSON.parse(JSON.stringify(defaults));
+        renderEditor();
+      });
+      controls.appendChild(reset);
+      body.appendChild(controls);
+      body.appendChild(status);
+    }
+
+    renderEditor();
+    openModal("主题导读编排", body);
+  }
+
   function openAdminModal() {
     if (!isAdmin()) return;
     if (USE_CLOUD && !openAdminModal._ready) {
@@ -4899,6 +5035,16 @@
       openSpotlightConfigModal();
     });
     body.appendChild(spotlightButton);
+
+    body.appendChild(el("hr", "modal-rule"));
+    body.appendChild(el("h3", "modal-sub", "主题导读"));
+    body.appendChild(el("p", "modal-meta", "人工选集保持固定，不会自动轮换。可修改作品、顺序与导读语；访客重新打开或刷新页面后即可看到。"));
+    var guidesButton = el("button", "btn-ghost", "编辑主题导读");
+    guidesButton.type = "button";
+    guidesButton.disabled = !USE_CLOUD;
+    guidesButton.title = USE_CLOUD ? "" : "离线单文件版未连接管理接口";
+    guidesButton.addEventListener("click", openReadingGuidesModal);
+    body.appendChild(guidesButton);
 
     body.appendChild(el("hr", "modal-rule"));
     body.appendChild(el("h3", "modal-sub", "登录权限"));
@@ -10193,38 +10339,69 @@
     return { edition: edition, work: work, id: id };
   }
 
+  function topicGuideCollections() {
+    var saved = store.settings && store.settings.readingGuides;
+    if (Array.isArray(saved) && saved.length) return saved;
+    var defaults = window.ARCHIVE_GUIDES && window.ARCHIVE_GUIDES.collections;
+    return Array.isArray(defaults) ? defaults : [];
+  }
+
+  var TOPIC_GUIDE_MARKS = {
+    "first-visit": { seal: "入门", icon: "i-star" },
+    "ten-minutes": { seal: "速读", icon: "i-toc" },
+    "folk-rites": { seal: "民俗", icon: "em-2025" },
+    "case-files": { seal: "调查", icon: "i-search" },
+    "dreaming-voyages": { seal: "远行", icon: "em-2024" },
+  };
+
   function renderTopicGuides() {
-    var guides = window.ARCHIVE_GUIDES && window.ARCHIVE_GUIDES.collections;
-    if (!Array.isArray(guides) || !guides.length) return null;
+    var guides = topicGuideCollections();
+    if (!guides.length) return null;
     var section = el("section", "home-section topic-guides");
     section.id = "reading-guides";
     var header = el("div", "topic-guides-head");
-    header.appendChild(el("span", "home-eyebrow", "READING PATHS"));
+    header.appendChild(el("span", "home-eyebrow", "04 · READING PATHS"));
     header.appendChild(el("h2", "home-section-title", "主题导读"));
-    header.appendChild(el("p", "home-section-note", "从已封存作品中挑选几条轻量导读；每条路线都可以随时更换。"));
+    header.appendChild(el("p", "home-section-note", "五张借阅索引，循着不同线索翻开已封存的档案。"));
     section.appendChild(header);
     var list = el("div", "topic-guide-list");
-    guides.forEach(function (guide) {
-      var works = (guide.workIds || []).map(curatedWorkFromId).filter(Boolean);
+    guides.forEach(function (guide, guideIndex) {
+      var works = (guide.workIds || []).map(function (id, index) {
+        var item = curatedWorkFromId(id);
+        return item && { item: item, reason: guide.reasons && guide.reasons[index] || "" };
+      }).filter(Boolean);
       if (!works.length) return;
       var card = el("article", "topic-guide-card");
-      card.appendChild(el("h3", "topic-guide-title", guide.title || "主题选集"));
+      if (guideIndex === guides.length - 1) card.classList.add("is-wide");
+      var mark = TOPIC_GUIDE_MARKS[guide.id] || { seal: "选读", icon: "i-bookmark" };
+      var cardHead = el("div", "topic-guide-card-head");
+      var icon = el("span", "topic-guide-icon");
+      icon.setAttribute("aria-hidden", "true");
+      icon.appendChild(svgUse(mark.icon, "icon"));
+      cardHead.appendChild(icon);
+      cardHead.appendChild(el("h3", "topic-guide-title", guide.title || "主题选集"));
+      card.appendChild(cardHead);
+      card.appendChild(el("span", "topic-guide-seal", mark.seal));
       card.appendChild(el("p", "topic-guide-audience", guide.audience || ""));
       card.appendChild(el("p", "topic-guide-description", guide.description || ""));
       var minutes = works.reduce(function (sum, item) {
-        return sum + Math.max(1, Math.ceil((Number(item.work.chars) || 0) / 400));
+        return sum + Math.max(1, Math.ceil((Number(item.item.work.chars) || 0) / 400));
       }, 0);
-      card.appendChild(el("p", "topic-guide-meta",
-        works.length + " 篇 · 约 " + minutes + " 分钟"));
+      var meta = el("p", "topic-guide-meta");
+      meta.appendChild(el("span", "topic-guide-meta-num", String(works.length)));
+      meta.appendChild(el("span", null, "篇 · 约"));
+      meta.appendChild(el("span", "topic-guide-meta-num", String(minutes)));
+      meta.appendChild(el("span", null, "分钟"));
+      card.appendChild(meta);
       var worksList = el("ol", "topic-guide-works");
-      works.forEach(function (item, index) {
-        var row = el("li");
-        var link = el("a", "topic-guide-work", item.work.title);
-        link.href = "#/" + item.edition.slug + "/" + encodeURIComponent(item.work.slug);
+      works.forEach(function (entry, index) {
+        var row = el("li", "topic-guide-row");
+        row.appendChild(el("span", "topic-guide-no", String(index + 1).padStart(2, "0")));
+        var link = el("a", "topic-guide-work");
+        link.href = "#/" + entry.item.edition.slug + "/" + encodeURIComponent(entry.item.work.slug);
+        link.appendChild(el("strong", null, entry.item.work.title));
+        if (entry.reason) link.appendChild(el("span", "topic-guide-reason", entry.reason));
         row.appendChild(link);
-        if (guide.reasons && guide.reasons[index]) {
-          row.appendChild(el("span", "topic-guide-reason", guide.reasons[index]));
-        }
         worksList.appendChild(row);
       });
       card.appendChild(worksList);
@@ -10238,8 +10415,7 @@
   function renderRelatedGuides(edition, work) {
     if (!isArchivedEdition(edition)) return null;
     var id = workId(edition.slug, work.slug);
-    var guides = window.ARCHIVE_GUIDES && window.ARCHIVE_GUIDES.collections;
-    if (!Array.isArray(guides)) return null;
+    var guides = topicGuideCollections();
     var picks = [];
     guides.some(function (guide) {
       var ids = guide.workIds || [];
