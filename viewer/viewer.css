@@ -8876,6 +8876,7 @@ html.is-dream-gate .boot-splash {
 
 .topic-guides { margin: 54px 0; }
 .topic-guides-head { max-width: 620px; }
+.topic-guides-head .home-section-note { justify-self: start; margin: 18px 0 0; }
 .topic-guide-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 20px; }
 .topic-guide-card {
   min-width: 0;

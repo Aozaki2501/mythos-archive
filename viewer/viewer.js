@@ -10200,8 +10200,8 @@
     section.id = "reading-guides";
     var header = el("div", "topic-guides-head");
     header.appendChild(el("span", "home-eyebrow", "READING PATHS"));
-    header.appendChild(el("h2", "home-section-title", "循着主题读"));
-    header.appendChild(el("p", "home-section-copy", "从已封存作品中挑选几条轻量导读；每条路线都可以随时更换。"));
+    header.appendChild(el("h2", "home-section-title", "主题导读"));
+    header.appendChild(el("p", "home-section-note", "从已封存作品中挑选几条轻量导读；每条路线都可以随时更换。"));
     section.appendChild(header);
     var list = el("div", "topic-guide-list");
     guides.forEach(function (guide) {
