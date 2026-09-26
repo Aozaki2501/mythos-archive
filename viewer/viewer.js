@@ -10346,12 +10346,12 @@
     return Array.isArray(defaults) ? defaults : [];
   }
 
-  var TOPIC_GUIDE_MARKS = {
-    "first-visit": { seal: "入门", icon: "i-star" },
-    "ten-minutes": { seal: "速读", icon: "i-toc" },
-    "folk-rites": { seal: "民俗", icon: "em-2025" },
-    "case-files": { seal: "调查", icon: "i-search" },
-    "dreaming-voyages": { seal: "远行", icon: "em-2024" },
+  var TOPIC_GUIDE_ICONS = {
+    "first-visit": "i-star",
+    "ten-minutes": "i-toc",
+    "folk-rites": "em-2025",
+    "case-files": "i-search",
+    "dreaming-voyages": "em-2024",
   };
 
   function renderTopicGuides() {
@@ -10373,15 +10373,13 @@
       if (!works.length) return;
       var card = el("article", "topic-guide-card");
       if (guideIndex === guides.length - 1) card.classList.add("is-wide");
-      var mark = TOPIC_GUIDE_MARKS[guide.id] || { seal: "选读", icon: "i-bookmark" };
       var cardHead = el("div", "topic-guide-card-head");
       var icon = el("span", "topic-guide-icon");
       icon.setAttribute("aria-hidden", "true");
-      icon.appendChild(svgUse(mark.icon, "icon"));
+      icon.appendChild(svgUse(TOPIC_GUIDE_ICONS[guide.id] || "i-bookmark", "icon"));
       cardHead.appendChild(icon);
       cardHead.appendChild(el("h3", "topic-guide-title", guide.title || "主题选集"));
       card.appendChild(cardHead);
-      card.appendChild(el("span", "topic-guide-seal", mark.seal));
       card.appendChild(el("p", "topic-guide-audience", guide.audience || ""));
       card.appendChild(el("p", "topic-guide-description", guide.description || ""));
       var minutes = works.reduce(function (sum, item) {
