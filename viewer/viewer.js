@@ -1688,6 +1688,27 @@
     return null;
   }
 
+  var openEditionRatingTip = null;
+  function closeEditionRatingTip() {
+    if (!openEditionRatingTip) return;
+    openEditionRatingTip.classList.remove("is-open");
+    var trigger = openEditionRatingTip.querySelector(".edition-index-rated-trigger");
+    if (trigger) trigger.setAttribute("aria-expanded", "false");
+    openEditionRatingTip = null;
+  }
+  function positionEditionRatingTip(seal) {
+    var tip = seal.querySelector(".edition-index-rating-tip");
+    if (!tip) return;
+    var box = seal.getBoundingClientRect();
+    var spaceBelow = window.innerHeight - box.bottom;
+    seal.classList.toggle("tip-above", spaceBelow < tip.offsetHeight + 12 && box.top > spaceBelow);
+  }
+  document.addEventListener("pointerdown", function (event) {
+    if (openEditionRatingTip && !openEditionRatingTip.contains(event.target)) {
+      closeEditionRatingTip();
+    }
+  });
+
   function localRatedWorkIds(edition) {
     if (!edition || !canInteract()) return [];
     return edition.works.filter(function (work) {
@@ -1761,12 +1782,22 @@
 
   function localRatingProgress(edition) {
     var ratedWorkIds = localRatedWorkIds(edition);
+    var myRatings = ratedWorkIds.map(function (id) {
+      var rating = myRatingOf(id);
+      return {
+        workId: id,
+        chuanlu: rating.chuanlu,
+        dangan: rating.dangan,
+        overall: rating.overall,
+      };
+    });
     var achievements = localRatingAchievementStates(edition, ratedWorkIds.length);
     var pendingAchievements = achievements.filter(function (item) { return item.noticePending; });
     return {
       status: "loaded",
       editionSlug: edition.slug,
       ratedWorkIds: ratedWorkIds,
+      myRatings: myRatings,
       ratedCount: ratedWorkIds.length,
       eligibleWorkCount: edition.works.length,
       milestone: RATING_PROGRESS_MILESTONE,
@@ -1837,6 +1868,7 @@
         status: "loaded",
         editionSlug: editionSlug,
         ratedWorkIds: Array.isArray(data && data.ratedWorkIds) ? data.ratedWorkIds : [],
+        myRatings: Array.isArray(data && data.myRatings) ? data.myRatings : [],
         ratedCount: Number(data && data.ratedCount) || 0,
         eligibleWorkCount: Number(data && data.eligibleWorkCount) || 0,
         milestone: Number(data && data.milestone) || RATING_PROGRESS_MILESTONE,
@@ -9001,6 +9033,7 @@
       randomRank[work.slug] = index;
     });
     function paint() {
+      closeEditionRatingTip();
       clear(list);
       choiceButtons.forEach(function (choice) {
         var active = state[choice.key] === choice.value;
@@ -9014,6 +9047,10 @@
       var ratedIds = progress && progress.status === "loaded"
         ? progress.ratedWorkIds
         : [];
+      var myRatingsById = Object.create(null);
+      (progress && progress.myRatings || []).forEach(function (rating) {
+        myRatingsById[rating.workId] = rating;
+      });
       var shown = edition.works.filter(function (work) {
         var id = workId(edition.slug, work.slug);
         if (state.onlyUnrated && ratedIds.indexOf(id) !== -1) return false;
@@ -9104,8 +9141,50 @@
         var isRated = ratedIds.indexOf(workId(edition.slug, work.slug)) !== -1;
         if (isRated) {
           var ratedSeal = el("span", "edition-index-rated");
-          ratedSeal.setAttribute("aria-label", "已评");
-          ratedSeal.appendChild(createRatedSeal("seal-tilt-r"));
+          var myScores = myRatingsById[workId(edition.slug, work.slug)];
+          if (myScores && DIMENSIONS.every(function (dim) { return Number.isInteger(myScores[dim.key]); })) {
+            ratedSeal.classList.add("has-scores");
+            var trigger = el("button", "edition-index-rated-trigger");
+            trigger.type = "button";
+            trigger.setAttribute("aria-label", "查看《" + work.title + "》的我的评分");
+            trigger.setAttribute("aria-expanded", "false");
+            var tipId = "edition-rating-tip-" + edition.slug + "-" + work.no;
+            trigger.setAttribute("aria-describedby", tipId);
+            var seal = createRatedSeal("seal-tilt-r");
+            seal.setAttribute("aria-hidden", "true");
+            trigger.appendChild(seal);
+            ratedSeal.appendChild(trigger);
+            var tip = el("span", "edition-index-rating-tip");
+            tip.id = tipId;
+            tip.setAttribute("role", "tooltip");
+            tip.appendChild(el("span", "edition-index-rating-tip-title", "我的评分"));
+            DIMENSIONS.forEach(function (dim) {
+              var scoreRow = el("span", "edition-index-rating-tip-row");
+              scoreRow.appendChild(el("span", "", dim.label));
+              scoreRow.appendChild(el("strong", "", String(myScores[dim.key])));
+              tip.appendChild(scoreRow);
+            });
+            ratedSeal.appendChild(tip);
+            ratedSeal.addEventListener("pointerenter", function () { positionEditionRatingTip(ratedSeal); });
+            ratedSeal.addEventListener("pointerleave", function () { ratedSeal.classList.remove("is-dismissed"); });
+            trigger.addEventListener("focus", function () { positionEditionRatingTip(ratedSeal); });
+            trigger.addEventListener("click", function () {
+              positionEditionRatingTip(ratedSeal);
+              var opening = openEditionRatingTip !== ratedSeal;
+              closeEditionRatingTip();
+              if (opening) {
+                ratedSeal.classList.remove("is-dismissed");
+                ratedSeal.classList.add("is-open");
+                trigger.setAttribute("aria-expanded", "true");
+                openEditionRatingTip = ratedSeal;
+              } else {
+                ratedSeal.classList.add("is-dismissed");
+              }
+            });
+          } else {
+            ratedSeal.setAttribute("aria-label", "已评");
+            ratedSeal.appendChild(createRatedSeal("seal-tilt-r"));
+          }
           row.appendChild(ratedSeal);
         }
         row.dataset.workId = workId(edition.slug, work.slug);

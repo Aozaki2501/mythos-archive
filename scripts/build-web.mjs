@@ -20,7 +20,7 @@ const WITCH_CUBE_ASSET = path.join(
   "witch-cube-v1.webp",
 );
 const BRAND_URL = "./archive-brand.webp?v=20260921-brand";
-const STATIC_VERSION = "20260926-historical-publication-v31";
+const STATIC_VERSION = "20260926-rating-score-tips-v32";
 const BUILD_DATE = STATIC_VERSION.slice(0, 8).replace(/^(\d{4})(\d{2})(\d{2})$/, "$1.$2.$3");
 const PUBLIC_ORIGIN = String(process.env.ARCHIVE_PUBLIC_ORIGIN || "").replace(/\/+$/, "");
 const built = spawnSync(process.execPath, ["scripts/build-html.mjs"], {

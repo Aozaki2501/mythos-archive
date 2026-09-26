@@ -110,6 +110,7 @@ try {
   for (const workId of workIds.slice(0, 11)) {
     insertRating.run(`${workId}::${memberQQ}`, workId, memberQQ, 4, 4, 4, new Date().toISOString());
   }
+  insertRating.run("other-user-rating", workIds[0], "90008", 1, 2, 3, new Date().toISOString());
   db.prepare(
     "INSERT INTO rating_achievements (id, qq, editionSlug, achievementKey, unlockedAt, notifiedAt) VALUES (?, ?, ?, ?, ?, NULL)",
   ).run(`${memberQQ}::2026::first-five`, memberQQ, "2026", "first-five", new Date().toISOString());
@@ -118,6 +119,12 @@ try {
   const backfilled = await callApi("getMyRatingProgress", { editionSlug: "2026" });
   assert.equal(backfilled.response.ok, true, backfilled.body.error);
   assert.equal(backfilled.body.data.ratedCount, 11);
+  assert.equal(backfilled.body.data.myRatings.length, 11);
+  assert.deepEqual(
+    backfilled.body.data.myRatings.find((rating) => rating.workId === workIds[0]),
+    { workId: workIds[0], chuanlu: 4, dangan: 4, overall: 4 },
+    "目录评分提示只返回当前登录者的三项分数",
+  );
   assert.deepEqual(
     backfilled.body.data.achievements.filter((item) => item.unlocked).map((item) => item.key),
     ["first-five", "rated-10"],
@@ -168,6 +175,8 @@ try {
   assert.equal(updateExisting.body.data.wasFirstRatingForWork, false);
   assert.equal(updateExisting.body.data.ratedCountAfter, 15);
   assert.equal(updateExisting.body.data.achievementUnlockedNow, false);
+  const updatedProgress = await callApi("getMyRatingProgress", { editionSlug: "2026" });
+  assert.equal(updatedProgress.body.data.myRatings.find((rating) => rating.workId === workIds[0]).chuanlu, 5);
 
   const dbAfterScores = new DatabaseSync(dbPath);
   const insertRemainingRating = dbAfterScores.prepare(

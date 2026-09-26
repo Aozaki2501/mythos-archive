@@ -556,14 +556,15 @@ function ratingAchievementDefinitions(total) {
 function ratingProgressForUser(qq, editionSlug) {
   const eligibleWorkIds = manifestCatalogueIds(editionSlug);
   const eligible = new Set(eligibleWorkIds);
-  const ratedWorkIds = db
-    .prepare("SELECT workId FROM ratings WHERE qq = ?")
+  const myRatings = db
+    .prepare("SELECT workId, chuanlu, dangan, overall FROM ratings WHERE qq = ?")
     .all(qq)
-    .map((row) => row.workId)
-    .filter((workId) => eligible.has(workId));
+    .filter((row) => eligible.has(row.workId));
+  const ratedWorkIds = myRatings.map((row) => row.workId);
   return {
     editionSlug,
     ratedWorkIds,
+    myRatings,
     ratedCount: ratedWorkIds.length,
     eligibleWorkCount: eligibleWorkIds.length,
     milestone: 5,
