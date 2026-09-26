@@ -10,6 +10,13 @@
     : "";
   var DESKTOP_ASSET = (scriptBase || "./") + "assets/witch-desktop-v2.webp";
   var CUBE_ASSET = (scriptBase || "./") + "assets/witch-cube-v1.webp";
+  var EXPRESSION_ASSETS = {
+    "eyes-closed": (scriptBase || "./") + "assets/witch-expression-eyes-closed.webp",
+    "soft-smile": (scriptBase || "./") + "assets/witch-expression-soft-smile.webp",
+    "puzzled": (scriptBase || "./") + "assets/witch-expression-puzzled.webp",
+    "half-lidded": (scriptBase || "./") + "assets/witch-expression-half-lidded.webp",
+    "surprised": (scriptBase || "./") + "assets/witch-expression-surprised.webp",
+  };
   var root = null;
   var refs = {};
   var mounted = false;
@@ -29,6 +36,13 @@
   var imageTimer = null;
   var imageLoaded = false;
   var imageRequested = false;
+  var blinkTimer = null;
+  var expressionTimer = null;
+  var touchResetTimer = null;
+  var expressionRequestToken = 0;
+  var expressionAssetStatus = {};
+  var headTouchCount = 0;
+  var lastHeadTouchAt = 0;
   var modalHidden = false;
   var panelOpen = false;
   var speechOnly = false;
@@ -36,7 +50,20 @@
   var pendingSpeechReason = "context";
   var MOBILE_ENABLED = false;
   var SHALLOW_SLEEP_DELAY = 150000;
+  var HEAD_TOUCH_WINDOW = 10000;
+  var HEAD_TOUCH_RESET_DELAY = 15000;
+  var HEAD_TOUCH_COOLDOWN = 1200;
+  var lastHeadReactionAt = 0;
   var observers = [];
+
+  var assistantState = {
+    activity: "idle",
+    panelMode: "guide",
+    stableExpression: "normal",
+    visualExpression: "normal",
+    storyId: null,
+    storyNode: null,
+  };
 
   var localState = loadState(LOCAL_KEY, {
     introSeen: false,
@@ -48,7 +75,9 @@
   var sessionState = loadState(SESSION_KEY, {
     openedWorkIds: [],
     triggeredEvents: [],
-    version: 1,
+    recentStoryIds: [],
+    storyProgress: null,
+    version: 2,
   });
 
   /* 台词集中在助手模块，避免把角色文案散落进主站路由。 */
@@ -135,6 +164,171 @@
     "comment-failure": { pool: "commentFailure", once: false },
   };
 
+
+  var POOL_EXPRESSIONS = {
+    night: "soft-smile",
+    day: "puzzled",
+    searchEmpty: "puzzled",
+    ratingSuccess: "soft-smile",
+    ratingFailure: "half-lidded",
+    commentSuccess: "soft-smile",
+    commentFailure: "puzzled",
+    readingFive: "surprised",
+  };
+
+  var STORIES = {
+    "walking-book": {
+      title: "会走的书",
+      start: "start",
+      nodes: {
+        start: {
+          text: "今天有一本书自己换了书架。",
+          expression: "puzzled",
+          choices: [
+            ["原来在哪？", "origin"],
+            ["抓到了吗？", "caught"],
+          ],
+        },
+        origin: {
+          text: "危险生物。它坚持要搬去旅游类。",
+          expression: "half-lidded",
+          choices: [
+            ["为什么是旅游类？", "travel"],
+            ["它很危险吗？", "danger"],
+          ],
+        },
+        travel: {
+          text: "它说每次被打开，都能去另一个地方。这个理由……很难反驳。",
+          expression: "soft-smile",
+          end: true,
+        },
+        danger: {
+          text: "暂时只咬过一张借阅卡。严格来说，受害者是一件文具。",
+          expression: "half-lidded",
+          end: true,
+        },
+        caught: {
+          text: "抓到了。它说只是出去取材。",
+          expression: "soft-smile",
+          choices: [
+            ["然后呢？", "ticket"],
+            ["你相信它？", "believe"],
+          ],
+        },
+        ticket: {
+          text: "我把它放回原处。第二天，它旁边多了一张车票。现在还没查到是谁盖的章。",
+          expression: "puzzled",
+          end: true,
+        },
+        believe: {
+          text: "馆员不负责相信，只负责把会逃跑的东西放回正确的位置。",
+          expression: "half-lidded",
+          end: true,
+        },
+      },
+    },
+    "book-in-hand": {
+      title: "馆员手里的书",
+      start: "start",
+      nodes: {
+        start: {
+          text: "这本还没有登记。",
+          expression: "normal",
+          choices: [
+            ["为什么？", "why"],
+            ["能借吗？", "borrow"],
+          ],
+        },
+        why: {
+          text: "它每次都会报一个新名字。昨天叫《北风目录》，今天坚持说自己是一本食谱。",
+          expression: "puzzled",
+          choices: [
+            ["那内容呢？", "content"],
+            ["就按今天的名字登记？", "register"],
+          ],
+        },
+        content: {
+          text: "内容倒很稳定。第一页永远写着：请不要相信封面。",
+          expression: "soft-smile",
+          end: true,
+        },
+        register: {
+          text: "试过。它当晚又改名了。档案编号倒是很有耐心。",
+          expression: "half-lidded",
+          end: true,
+        },
+        borrow: {
+          text: "等它先承认自己是一本书。",
+          expression: "half-lidded",
+          choices: [
+            ["它不承认？", "deny"],
+            ["那你为什么一直拿着？", "holding"],
+          ],
+        },
+        deny: {
+          text: "目前自称“某种比较安静的门”。我还在等它解释门为什么需要书签。",
+          expression: "puzzled",
+          end: true,
+        },
+        holding: {
+          text: "因为放下以后，它会自己翻到我没读完的那一页。很没有礼貌。",
+          expression: "soft-smile",
+          end: true,
+        },
+      },
+    },
+    "night-lost-found": {
+      title: "夜班失物",
+      start: "start",
+      nodes: {
+        start: {
+          text: "失物柜里多了一段梦。",
+          expression: "surprised",
+          choices: [
+            ["谁丢的？", "owner"],
+            ["有人来领吗？", "claimed"],
+          ],
+        },
+        owner: {
+          text: "不清楚。上面只写着：明天再想。",
+          expression: "puzzled",
+          choices: [
+            ["你打开看过？", "looked"],
+            ["那就放到明天？", "tomorrow"],
+          ],
+        },
+        looked: {
+          text: "没有。别人的梦和别人的信一样，馆员最好只看封面。",
+          expression: "half-lidded",
+          end: true,
+        },
+        tomorrow: {
+          text: "试过。第二天失物柜里多了两个“明天”。现在不敢继续拖了。",
+          expression: "soft-smile",
+          end: true,
+        },
+        claimed: {
+          text: "来过。领走以后，又把明天忘在这里。",
+          expression: "puzzled",
+          choices: [
+            ["还是同一个人？", "same"],
+            ["后来怎么办？", "after"],
+          ],
+        },
+        same: {
+          text: "名字一样，影子不一样。我没有追问。夜班守则里没有这一条。",
+          expression: "half-lidded",
+          end: true,
+        },
+        after: {
+          text: "我给那段梦贴了新的标签：待认领。日期那一栏先空着。",
+          expression: "soft-smile",
+          end: true,
+        },
+      },
+    },
+  };
+
   function loadState(key, fallback) {
     var value = {};
     try {
@@ -150,6 +344,10 @@
     if (!Array.isArray(result.recentDialogueIds)) result.recentDialogueIds = [];
     if (!Array.isArray(result.openedWorkIds)) result.openedWorkIds = [];
     if (!Array.isArray(result.triggeredEvents)) result.triggeredEvents = [];
+    if (!Array.isArray(result.recentStoryIds)) result.recentStoryIds = [];
+    if (!result.storyProgress || typeof result.storyProgress !== "object") {
+      result.storyProgress = null;
+    }
     return result;
   }
 
@@ -237,6 +435,139 @@
     root.dataset.witchState = nextState || "idle";
   }
 
+  function isCompactDesktop() {
+    if (!window.matchMedia) return false;
+    return !!(
+      window.matchMedia("(min-width: 781px) and (max-width: 1439px)").matches ||
+      window.matchMedia("(min-width: 781px) and (max-height: 699px)").matches
+    );
+  }
+
+  function clearExpressionTimer() {
+    if (expressionTimer) window.clearTimeout(expressionTimer);
+    expressionTimer = null;
+  }
+
+  function applyExpressionVisual(name) {
+    assistantState.visualExpression = name || "normal";
+    if (root) root.dataset.witchExpression = assistantState.visualExpression;
+    if (!refs.expressionImage) return;
+    if (!name || name === "normal") {
+      refs.expressionImage.hidden = true;
+      refs.expressionImage.removeAttribute("src");
+      return;
+    }
+    var asset = EXPRESSION_ASSETS[name];
+    if (!asset || expressionAssetStatus[name] === false) {
+      refs.expressionImage.hidden = true;
+      return;
+    }
+    if (expressionAssetStatus[name] === true) {
+      refs.expressionImage.src = asset;
+      refs.expressionImage.hidden = false;
+      return;
+    }
+    var token = ++expressionRequestToken;
+    var preload = new window.Image();
+    preload.decoding = "async";
+    preload.onload = function () {
+      expressionAssetStatus[name] = true;
+      if (token !== expressionRequestToken || assistantState.visualExpression !== name) return;
+      refs.expressionImage.src = asset;
+      refs.expressionImage.hidden = false;
+    };
+    preload.onerror = function () {
+      expressionAssetStatus[name] = false;
+      if (token !== expressionRequestToken) return;
+      refs.expressionImage.hidden = true;
+    };
+    preload.src = asset;
+  }
+
+  function setStableExpression(name) {
+    clearExpressionTimer();
+    assistantState.stableExpression = name || "normal";
+    applyExpressionVisual(assistantState.stableExpression);
+  }
+
+  function flashExpression(name, duration) {
+    clearExpressionTimer();
+    applyExpressionVisual(name || assistantState.stableExpression);
+    if (!duration) return;
+    expressionTimer = window.setTimeout(function () {
+      expressionTimer = null;
+      applyExpressionVisual(assistantState.stableExpression);
+    }, duration);
+  }
+
+  function clearBlinkTimer() {
+    if (blinkTimer) window.clearTimeout(blinkTimer);
+    blinkTimer = null;
+  }
+
+  function canBlink() {
+    return !!(
+      root &&
+      imageLoaded &&
+      !root.hidden &&
+      !isMobile() &&
+      !prefersReducedMotion() &&
+      !isBlocked() &&
+      localState.displayMode !== "minimized" &&
+      !localState.autoSpeechPaused &&
+      assistantState.activity !== "white-ship" &&
+      assistantState.activity !== "departing" &&
+      !root.classList.contains("is-drowsy") &&
+      document.visibilityState !== "hidden"
+    );
+  }
+
+  function scheduleBlink() {
+    if (blinkTimer || !canBlink()) return;
+    var delay = 4000 + Math.floor(Math.random() * 5001);
+    blinkTimer = window.setTimeout(function () {
+      blinkTimer = null;
+      if (!canBlink()) return;
+      flashExpression("eyes-closed", 150);
+      scheduleBlink();
+    }, delay);
+  }
+
+  function resetHeadTouchSequence() {
+    headTouchCount = 0;
+    lastHeadTouchAt = 0;
+    if (touchResetTimer) window.clearTimeout(touchResetTimer);
+    touchResetTimer = null;
+  }
+
+  function scheduleHeadTouchReset() {
+    if (touchResetTimer) window.clearTimeout(touchResetTimer);
+    touchResetTimer = window.setTimeout(function () {
+      touchResetTimer = null;
+      resetHeadTouchSequence();
+    }, HEAD_TOUCH_RESET_DELAY);
+  }
+
+  function saveStoryProgress(storyId, nodeId, complete) {
+    if (complete) {
+      sessionState.storyProgress = null;
+    } else {
+      sessionState.storyProgress = { storyId: storyId, nodeId: nodeId };
+    }
+    if (storyId) {
+      sessionState.recentStoryIds = sessionState.recentStoryIds.filter(function (id) {
+        return id !== storyId;
+      });
+      sessionState.recentStoryIds.unshift(storyId);
+      sessionState.recentStoryIds = sessionState.recentStoryIds.slice(0, 3);
+    }
+    saveState(SESSION_KEY, sessionState);
+  }
+
+  function setPanelMode(mode) {
+    assistantState.panelMode = mode || "guide";
+  }
+
   function setRatingProgress(progress) {
     if (!refs.ratingProgress) return;
     if (!progress || progress.status !== "loaded") {
@@ -313,6 +644,8 @@
       !isBlocked() &&
       localState.displayMode !== "minimized" &&
       !localState.autoSpeechPaused &&
+      assistantState.activity === "idle" &&
+      !(root && root.classList.contains("is-open")) &&
       document.visibilityState !== "hidden"
     );
   }
@@ -321,21 +654,32 @@
     if (shallowSleepTimer) window.clearTimeout(shallowSleepTimer);
     shallowSleepTimer = null;
     if (root) root.classList.remove("is-drowsy");
+    if (assistantState.stableExpression === "eyes-closed") {
+      setStableExpression("normal");
+    }
   }
 
   function scheduleShallowSleep() {
     if (shallowSleepTimer || !canEnterShallowSleep()) return;
     shallowSleepTimer = window.setTimeout(function () {
       shallowSleepTimer = null;
-      if (canEnterShallowSleep()) root.classList.add("is-drowsy");
+      if (!canEnterShallowSleep()) return;
+      clearBlinkTimer();
+      root.classList.add("is-drowsy");
+      setStableExpression("eyes-closed");
     }, SHALLOW_SLEEP_DELAY);
   }
 
   function wakeFromShallowSleep() {
     if (!root) return;
+    var wasDrowsy = root.classList.contains("is-drowsy");
     if (shallowSleepTimer) window.clearTimeout(shallowSleepTimer);
     shallowSleepTimer = null;
     root.classList.remove("is-drowsy");
+    if (wasDrowsy || assistantState.stableExpression === "eyes-closed") {
+      setStableExpression("normal");
+    }
+    scheduleBlink();
     scheduleShallowSleep();
   }
 
@@ -367,6 +711,8 @@
       !isBlocked() &&
       localState.displayMode !== "minimized" &&
       !localState.autoSpeechPaused &&
+      assistantState.activity !== "white-ship" &&
+      assistantState.activity !== "departing" &&
       document.visibilityState !== "hidden"
     );
   }
@@ -436,9 +782,9 @@
     var y = (point.y - centerY) / (rect.height / 2 + padding);
     x = Math.max(-1, Math.min(1, x));
     y = Math.max(-1, Math.min(1, y));
-    refs.character.style.setProperty("--witch-proximity-x", (x * 4).toFixed(2) + "px");
-    refs.character.style.setProperty("--witch-proximity-y", (y * 3).toFixed(2) + "px");
-    refs.character.style.setProperty("--witch-proximity-rotate", (x * 2.4).toFixed(2) + "deg");
+    refs.character.style.setProperty("--witch-proximity-x", (x * 1.5).toFixed(2) + "px");
+    refs.character.style.setProperty("--witch-proximity-y", (y * 1).toFixed(2) + "px");
+    refs.character.style.setProperty("--witch-proximity-rotate", "0deg");
   }
 
   function handleWitchProximity(event) {
@@ -447,6 +793,18 @@
       event.pointerType !== "mouse" &&
       event.pointerType !== "pen"
     ) {
+      clearWitchProximity();
+      return;
+    }
+    if (!refs.character) return;
+    var rect = refs.character.getBoundingClientRect();
+    var padding = 56;
+    var near =
+      event.clientX >= rect.left - padding &&
+      event.clientX <= rect.right + padding &&
+      event.clientY >= rect.top - padding &&
+      event.clientY <= rect.bottom + padding;
+    if (!near) {
       clearWitchProximity();
       return;
     }
@@ -469,7 +827,15 @@
   }
 
   function startWhiteShipRoll(finalRoll, reduced) {
-    if (!refs.rollReadout || reduced || isMobile()) return;
+    assistantState.activity = "white-ship";
+    closeDesktopBubble(false);
+    clearForeheadTwinkle();
+    clearBlinkTimer();
+    clearShallowSleep();
+    if (!refs.rollReadout || reduced || isMobile()) {
+      setWitchState("rolling");
+      return;
+    }
     clearRollTimers();
     setWitchState("rolling");
     refs.rollReadout.classList.remove("is-final");
@@ -488,7 +854,13 @@
   }
 
   function showWhiteShipDeparture() {
-    if (!refs.rollReadout || isMobile()) return;
+    clearBlinkTimer();
+    clearShallowSleep();
+    assistantState.activity = "departing";
+    if (!refs.rollReadout || isMobile()) {
+      setWitchState("departing");
+      return;
+    }
     clearRollTimers();
     setWitchState("departing");
     // 离场只保留视觉状态，判定结果继续显示，不再额外弹出离场文案。
@@ -501,7 +873,13 @@
       refs.rollReadout.classList.remove("is-final");
       setHidden(refs.rollReadout, true);
     }
-    if (root && root.dataset.witchState === "rolling") setWitchState("idle");
+    assistantState.activity = "idle";
+    if (root && (root.dataset.witchState === "rolling" || root.dataset.witchState === "departing")) {
+      setWitchState("idle");
+    }
+    scheduleBlink();
+    scheduleShallowSleep();
+    scheduleForeheadTwinkle();
   }
 
   function replayDialogueReveal() {
@@ -523,12 +901,28 @@
     root.classList.remove("is-speaking");
     if (root.dataset.witchState === "speaking") setWitchState("idle");
     refs.bubble.setAttribute("aria-hidden", "true");
-    if (returnFocus && refs.character) refs.character.focus();
+    if (assistantState.panelMode === "story" || assistantState.panelMode === "story-menu") {
+      setStableExpression("normal");
+      setPanelMode("guide");
+      assistantState.storyId = null;
+      assistantState.storyNode = null;
+      if (context) {
+        var selected = chooseDialogue(DIALOGUE[context.pageType] || DIALOGUE.home);
+        setDialogue(selected.text);
+      }
+    }
+    scheduleBlink();
+    scheduleShallowSleep();
+    if (returnFocus && refs.characterMainAction) refs.characterMainAction.focus();
   }
 
   function openDesktopBubble(auto) {
     if (!refs.bubble || isBlocked() || isMobile()) return;
     if (localState.displayMode === "minimized") return;
+    if (shallowSleepTimer) window.clearTimeout(shallowSleepTimer);
+    shallowSleepTimer = null;
+    if (root) root.classList.remove("is-drowsy");
+    clearBlinkTimer();
     if (speechTimer) window.clearTimeout(speechTimer);
     speechTimer = null;
     speechOnly = !!auto;
@@ -537,8 +931,15 @@
     root.classList.add("is-open");
     root.classList.toggle("is-speaking", speechOnly);
     refs.bubble.setAttribute("aria-hidden", "false");
-    if (speechOnly) clear(refs.actions);
-    else renderActions(refs.actions, false);
+    if (speechOnly) {
+      clear(refs.actions);
+    } else if (assistantState.panelMode === "story") {
+      renderStoryNode();
+    } else if (assistantState.panelMode === "story-menu") {
+      renderStoryMenu();
+    } else {
+      renderActions(refs.actions, false);
+    }
     setQuietToggleLabel();
     replayDialogueReveal();
     if (speechOnly) {
@@ -552,6 +953,9 @@
   function scheduleSpeechBubble(reason) {
     reason = reason || "context";
     if (localState.autoSpeechPaused && reason !== "event") return;
+    if (assistantState.activity === "white-ship" || assistantState.activity === "departing") {
+      return;
+    }
     if (
       !refs.bubble ||
       isMobile() ||
@@ -605,12 +1009,189 @@
     if (refs.mobileDialogue) refs.mobileDialogue.textContent = safeText(text);
   }
 
+  function showInlineEvent(text) {
+    if (!refs.eventTip) return;
+    refs.eventTip.textContent = safeText(text);
+    setHidden(refs.eventTip, false);
+    if (eventTimer) window.clearTimeout(eventTimer);
+    eventTimer = window.setTimeout(function () {
+      eventTimer = null;
+      setHidden(refs.eventTip, true);
+    }, 4200);
+  }
+
+  function renderStoryMenu() {
+    if (!refs.actions) return;
+    clear(refs.actions);
+    var progress = sessionState.storyProgress;
+    if (
+      progress &&
+      progress.storyId &&
+      STORIES[progress.storyId] &&
+      STORIES[progress.storyId].nodes[progress.nodeId]
+    ) {
+      refs.actions.appendChild(
+        createAction("继续「" + STORIES[progress.storyId].title + "」", "story-continue", "witch-action"),
+      );
+    }
+    if (isCompactDesktop()) {
+      refs.actions.appendChild(createAction("轻触头部", "touch-head", "witch-action"));
+      refs.actions.appendChild(createAction("问问这本书", "book-story", "witch-action"));
+    }
+    Object.keys(STORIES).forEach(function (storyId) {
+      refs.actions.appendChild(
+        createAction(STORIES[storyId].title, "story:" + storyId, "witch-action"),
+      );
+    });
+    refs.actions.appendChild(
+      createAction("返回导览", "story-back", "witch-action witch-action-muted"),
+    );
+  }
+
+  function renderStoryNode() {
+    var story = STORIES[assistantState.storyId];
+    var node = story && story.nodes[assistantState.storyNode];
+    if (!story || !node || !refs.actions) {
+      openStoryMenu();
+      return;
+    }
+    setDialogue(node.text);
+    setStableExpression(node.expression || "normal");
+    clear(refs.actions);
+    (node.choices || []).forEach(function (choice, index) {
+      var button = makeNode("button", "witch-action", choice[0]);
+      button.type = "button";
+      button.setAttribute("data-story-choice", String(index));
+      button.addEventListener("click", function () {
+        chooseStoryBranch(index);
+      });
+      refs.actions.appendChild(button);
+    });
+    if (node.end) {
+      refs.actions.appendChild(
+        createAction("故事到这里", "story-finish", "witch-action"),
+      );
+    }
+    refs.actions.appendChild(
+      createAction("换一个故事", "story-menu", "witch-action witch-action-muted"),
+    );
+    refs.actions.appendChild(
+      createAction("返回导览", "story-back", "witch-action witch-action-muted"),
+    );
+    replayDialogueReveal();
+  }
+
+  function openStoryMenu() {
+    markIntroSeen();
+    setPanelMode("story-menu");
+    assistantState.storyId = null;
+    assistantState.storyNode = null;
+    setStableExpression("normal");
+    setDialogue("夜班还长。想听哪一件档案馆里的小事？");
+    openDesktopBubble(false);
+    renderStoryMenu();
+  }
+
+  function startStory(storyId, nodeId) {
+    var story = STORIES[storyId];
+    if (!story) return;
+    var nextNode = nodeId && story.nodes[nodeId] ? nodeId : story.start;
+    setPanelMode("story");
+    assistantState.storyId = storyId;
+    assistantState.storyNode = nextNode;
+    saveStoryProgress(storyId, nextNode, false);
+    openDesktopBubble(false);
+    renderStoryNode();
+  }
+
+  function chooseStoryBranch(index) {
+    var story = STORIES[assistantState.storyId];
+    var node = story && story.nodes[assistantState.storyNode];
+    var choice = node && node.choices && node.choices[index];
+    if (!choice) return;
+    var nextNode = choice[1];
+    if (!story.nodes[nextNode]) return;
+    assistantState.storyNode = nextNode;
+    saveStoryProgress(assistantState.storyId, nextNode, false);
+    renderStoryNode();
+  }
+
+  function finishStory() {
+    var storyId = assistantState.storyId;
+    if (storyId) saveStoryProgress(storyId, assistantState.storyNode, true);
+    setPanelMode("story-menu");
+    assistantState.storyId = null;
+    assistantState.storyNode = null;
+    setStableExpression("soft-smile");
+    setDialogue("就这些。档案馆的小事通常没有结论，只有归档日期。");
+    renderStoryMenu();
+    replayDialogueReveal();
+  }
+
+  function returnToGuide() {
+    setPanelMode("guide");
+    assistantState.storyId = null;
+    assistantState.storyNode = null;
+    setStableExpression("normal");
+    if (context) {
+      var selected = chooseDialogue(DIALOGUE[context.pageType] || DIALOGUE.home);
+      setDialogue(selected.text);
+    }
+    renderActions(refs.actions, false);
+    replayDialogueReveal();
+  }
+
+  function handleHeadTouch() {
+    var now = Date.now();
+    if (assistantState.activity === "white-ship" || assistantState.activity === "departing") return;
+    var cooldown = headTouchCount >= 3 ? 5000 : HEAD_TOUCH_COOLDOWN;
+    if (now - lastHeadReactionAt < cooldown) return;
+    lastHeadReactionAt = now;
+    if (!lastHeadTouchAt || now - lastHeadTouchAt > HEAD_TOUCH_WINDOW) headTouchCount = 0;
+    lastHeadTouchAt = now;
+    headTouchCount += 1;
+    scheduleHeadTouchReset();
+    markIntroSeen();
+    setPanelMode("guide");
+    var text = "";
+    var expression = "puzzled";
+    if (headTouchCount === 1) {
+      text = "嗯？有哪份档案找不到吗？";
+      expression = "puzzled";
+    } else if (headTouchCount === 2) {
+      text = "……头发上没有目录。";
+      expression = "half-lidded";
+    } else {
+      text = "馆员正在值班。请稍后再摸。";
+      expression = "half-lidded";
+    }
+    setDialogue(text);
+    setStableExpression(expression);
+    openDesktopBubble(true);
+    clearExpressionTimer();
+    expressionTimer = window.setTimeout(function () {
+      expressionTimer = null;
+      if (assistantState.panelMode === "guide") setStableExpression("normal");
+    }, 2600);
+  }
+
+  function handleBookInteraction() {
+    if (assistantState.activity === "white-ship" || assistantState.activity === "departing") return;
+    markIntroSeen();
+    startStory("book-in-hand");
+  }
+
   /* 指定台词池直接开口：事件和主题切换共用同一条通道。 */
   function speakDialogue(poolKey, reason) {
     var pool = DIALOGUE[poolKey];
     if (!pool || !pool.length) return false;
     var selected = chooseDialogue(pool);
+    if (assistantState.panelMode === "story" || assistantState.panelMode === "story-menu") {
+      if ((reason || "event") === "event") showInlineEvent(selected.text);
+      return true;
+    }
     setDialogue(selected.text);
+    if (POOL_EXPRESSIONS[poolKey]) flashExpression(POOL_EXPRESSIONS[poolKey], 2200);
     pendingSpeech = true;
     scheduleSpeechBubble(reason || "event");
     return true;
@@ -618,7 +1199,12 @@
 
   function speakText(text) {
     if (!text) return false;
+    if (assistantState.panelMode === "story" || assistantState.panelMode === "story-menu") {
+      showInlineEvent(text);
+      return true;
+    }
     setDialogue(text);
+    flashExpression("surprised", 1800);
     pendingSpeech = true;
     scheduleSpeechBubble("event");
     return true;
@@ -636,6 +1222,9 @@
     var nextKey = contextKeyFor(nextContext);
     if (nextKey === contextKey && refs.dialogue && refs.dialogue.textContent) return;
     contextKey = nextKey;
+    if (assistantState.panelMode === "story" || assistantState.panelMode === "story-menu") {
+      return;
+    }
     /* 页面切换只使用页面导览词。主题台词在主题真正切换时单独触发，
        否则黑夜模式下每次路由变化都会重复“黑夜模式”开场。 */
     var selected = chooseDialogue(DIALOGUE[nextContext.pageType] || DIALOGUE.home);
@@ -674,6 +1263,7 @@
   }
 
   function toggleCharacter() {
+    if (assistantState.activity === "white-ship" || assistantState.activity === "departing") return;
     if (localState.displayMode === "minimized") {
       localState.displayMode = "visible";
       saveState(LOCAL_KEY, localState);
@@ -696,6 +1286,35 @@
   }
 
   function performAction(action) {
+    if (action === "touch-head") {
+      handleHeadTouch();
+      return;
+    }
+    if (action === "book-story") {
+      handleBookInteraction();
+      return;
+    }
+    if (action === "chat" || action === "story-menu") {
+      openStoryMenu();
+      return;
+    }
+    if (action === "story-continue") {
+      var progress = sessionState.storyProgress;
+      if (progress && STORIES[progress.storyId]) startStory(progress.storyId, progress.nodeId);
+      return;
+    }
+    if (action.indexOf("story:") === 0) {
+      startStory(action.slice(6));
+      return;
+    }
+    if (action === "story-finish") {
+      finishStory();
+      return;
+    }
+    if (action === "story-back") {
+      returnToGuide();
+      return;
+    }
     if (!context) return;
     var edition = context.editionSlug ? encodeURIComponent(context.editionSlug) : "";
     closeAll(false);
@@ -800,14 +1419,17 @@
       setQuietToggleLabel();
       if (localState.autoSpeechPaused) {
         clearForeheadTwinkle();
+        clearBlinkTimer();
         clearShallowSleep();
         clearNightShift();
       } else {
         scheduleForeheadTwinkle();
+        scheduleBlink();
         scheduleShallowSleep();
       }
     });
     bubbleFoot.appendChild(refs.quietToggle);
+    bubbleFoot.appendChild(createAction("聊聊", "chat", "witch-action witch-action-muted"));
     var collapse = createAction("收起", "close", "witch-action witch-action-muted");
     collapse.addEventListener("click", function () {
       closeDesktopBubble(false);
@@ -850,21 +1472,8 @@
     else root.appendChild(refs.ratingProgress);
 
     refs.character = makeNode("div", "witch-character");
-    refs.character.setAttribute("role", "button");
-    refs.character.setAttribute("tabindex", "0");
-    refs.character.setAttribute("aria-label", "打开卡莉欧碧导览");
-    refs.character.setAttribute("aria-controls", "witch-bubble");
+    refs.character.setAttribute("aria-label", "卡莉欧碧导览助手");
     refs.character.appendChild(makeNode("span", "witch-fallback", "✦"));
-    refs.character.addEventListener("click", function () {
-      toggleCharacter();
-    });
-    refs.character.addEventListener("keydown", function (event) {
-      if (event.key === "Escape") closeDesktopBubble(true);
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        toggleCharacter();
-      }
-    });
 
     refs.introTip = makeNode("span", "witch-intro-tip", "第一次来？");
     refs.introTip.setAttribute("role", "status");
@@ -892,7 +1501,8 @@
       saveState(LOCAL_KEY, localState);
       syncVisibility();
       markIntroSeen();
-      refs.character.click();
+      toggleCharacter();
+      if (refs.characterMainAction) refs.characterMainAction.focus();
     });
     root.appendChild(refs.bubble);
     root.appendChild(figure);
@@ -976,12 +1586,57 @@
       imageLoaded = true;
       refs.character.classList.add("has-image");
       scheduleForeheadTwinkle();
+      scheduleBlink();
       scheduleShallowSleep();
     };
     image.onerror = function () {
       refs.character.classList.add("image-failed");
     };
     image.src = DESKTOP_ASSET;
+    refs.expressionImage = document.createElement("img");
+    refs.expressionImage.className = "witch-expression-image";
+    refs.expressionImage.alt = "";
+    refs.expressionImage.decoding = "async";
+    refs.expressionImage.hidden = true;
+
+    refs.characterMainAction = makeNode("button", "witch-character-main-action");
+    refs.characterMainAction.type = "button";
+    refs.characterMainAction.setAttribute("aria-label", "打开卡莉欧碧导览");
+    refs.characterMainAction.setAttribute("aria-controls", "witch-bubble");
+    refs.characterMainAction.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      wakeFromShallowSleep();
+      toggleCharacter();
+    });
+    refs.characterMainAction.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeDesktopBubble(true);
+      }
+      event.stopPropagation();
+    });
+
+    var headAction = makeNode("button", "witch-hotspot witch-hotspot-head");
+    headAction.type = "button";
+    headAction.setAttribute("aria-label", "轻触卡莉欧碧的头部");
+    headAction.title = "轻触头部";
+    headAction.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      wakeFromShallowSleep();
+      handleHeadTouch();
+    });
+    var bookAction = makeNode("button", "witch-hotspot witch-hotspot-book");
+    bookAction.type = "button";
+    bookAction.setAttribute("aria-label", "问问卡莉欧碧手里的书");
+    bookAction.title = "问问这本书";
+    bookAction.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      wakeFromShallowSleep();
+      handleBookInteraction();
+    });
     var cube = document.createElement("img");
     cube.className = "witch-cube";
     cube.alt = "";
@@ -994,6 +1649,7 @@
     cubeAction.addEventListener("click", function (event) {
       event.preventDefault();
       event.stopPropagation();
+      wakeFromShallowSleep();
       requestWhiteShip();
     });
     cubeAction.appendChild(cube);
@@ -1007,9 +1663,15 @@
     }
     portrait.appendChild(glow);
     portrait.appendChild(image);
+    portrait.appendChild(refs.expressionImage);
     portrait.appendChild(foreheadStars);
+    portrait.appendChild(refs.characterMainAction);
+    portrait.appendChild(headAction);
+    portrait.appendChild(bookAction);
     portrait.appendChild(cubeAction);
     portrait.appendChild(stars);
+    refs.headAction = headAction;
+    refs.bookAction = bookAction;
     refs.cubeAction = cubeAction;
     refs.foreheadStars = foreheadStars;
     refs.character.insertBefore(portrait, refs.character.firstChild);
@@ -1044,15 +1706,15 @@
     if (!refs.eventTip || !context || isMobile() || isBlocked() || prefersReducedMotion()) return;
     if (localState.displayMode === "minimized") return;
     var selected = chooseDialogue(DIALOGUE.readingFive);
+    if (assistantState.panelMode === "story" || assistantState.panelMode === "story-menu") {
+      showInlineEvent(selected.text);
+      return;
+    }
     setDialogue(selected.text);
+    flashExpression("surprised", 2200);
     pendingSpeech = true;
     setHidden(refs.eventTip, true);
     scheduleSpeechBubble("event");
-    if (eventTimer) window.clearTimeout(eventTimer);
-    eventTimer = window.setTimeout(function () {
-      setHidden(refs.eventTip, true);
-      eventTimer = null;
-    }, 4000);
   }
 
   function notify(eventName) {
@@ -1090,11 +1752,13 @@
     }
     if (blocked || mobile || localState.displayMode === "minimized") {
       clearForeheadTwinkle();
+      clearBlinkTimer();
       clearWitchProximity();
       clearShallowSleep();
       clearNightShift();
     } else {
       scheduleForeheadTwinkle();
+      scheduleBlink();
       scheduleShallowSleep();
     }
     if (refs.mobileEntry) {
@@ -1147,7 +1811,7 @@
       if (!isMobile()) scheduleImage();
     });
     document.addEventListener("keydown", function (event) {
-      wakeFromShallowSleep();
+      if (root && root.contains(event.target)) wakeFromShallowSleep();
       if (event.key !== "Escape") return;
       if (panelOpen) closeMobilePanel(true);
       else if (root && root.classList.contains("is-open")) closeDesktopBubble(true);
@@ -1155,14 +1819,17 @@
     document.addEventListener("visibilitychange", function () {
       if (document.visibilityState === "hidden") {
         clearForeheadTwinkle();
+        clearBlinkTimer();
         clearShallowSleep();
         clearNightShift();
       } else {
         syncVisibility();
       }
     });
-    document.addEventListener("pointerdown", wakeFromShallowSleep, { passive: true });
-    window.addEventListener("scroll", wakeFromShallowSleep, { passive: true });
+    if (root) {
+      root.addEventListener("focusin", wakeFromShallowSleep);
+      root.addEventListener("pointerdown", wakeFromShallowSleep, { passive: true });
+    }
     window.addEventListener("pointermove", handleWitchProximity, { passive: true });
     window.addEventListener("blur", clearWitchProximity);
     syncVisibility();
@@ -1174,7 +1841,13 @@
     wakeFromShallowSleep();
     context = Object.assign({}, nextContext);
     updateDialogue(context);
-    renderActions(refs.actions, false);
+    if (assistantState.panelMode === "story") {
+      renderStoryNode();
+    } else if (assistantState.panelMode === "story-menu") {
+      renderStoryMenu();
+    } else {
+      renderActions(refs.actions, false);
+    }
     renderActions(refs.mobileActions, true);
     syncVisibility();
     scheduleIntro();

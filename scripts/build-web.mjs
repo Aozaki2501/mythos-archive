@@ -19,8 +19,15 @@ const WITCH_CUBE_ASSET = path.join(
   "assets",
   "witch-cube-v1.webp",
 );
+const WITCH_EXPRESSION_ASSETS = [
+  "witch-expression-eyes-closed.webp",
+  "witch-expression-soft-smile.webp",
+  "witch-expression-puzzled.webp",
+  "witch-expression-half-lidded.webp",
+  "witch-expression-surprised.webp",
+];
 const BRAND_URL = "./archive-brand.webp?v=20260921-brand";
-const STATIC_VERSION = "20260926-route-completion-v35";
+const STATIC_VERSION = "20260926-witch-interaction-v37";
 const BUILD_DATE = STATIC_VERSION.slice(0, 8).replace(/^(\d{4})(\d{2})(\d{2})$/, "$1.$2.$3");
 const PUBLIC_ORIGIN = String(process.env.ARCHIVE_PUBLIC_ORIGIN || "").replace(/\/+$/, "");
 const built = spawnSync(process.execPath, ["scripts/build-html.mjs"], {
@@ -455,6 +462,10 @@ fs.copyFileSync(
   WITCH_CUBE_ASSET,
   path.join(witchAssetDir, "witch-cube-v1.webp"),
 );
+for (const assetName of WITCH_EXPRESSION_ASSETS) {
+  const source = path.join(ROOT, "viewer", "assets", assetName);
+  fs.copyFileSync(source, path.join(witchAssetDir, assetName));
+}
 fs.rmSync(path.join(outDir, "archive-brand.png"), { force: true });
 console.log("web out=", path.join(outDir, "index.html"));
 console.log("apiUrl=", API_URL);

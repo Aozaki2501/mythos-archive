@@ -5700,7 +5700,7 @@ body[data-view="results"] .witch-assistant {
 .witch-character:focus-visible {
   transform: translate3d(
     var(--witch-proximity-x),
-    calc(var(--witch-proximity-y) - 3px),
+    calc(var(--witch-proximity-y) - 1px),
     0
   ) rotate(var(--witch-proximity-rotate));
 }
@@ -5723,6 +5723,28 @@ body[data-view="results"] .witch-assistant {
   filter: drop-shadow(0 8px 10px rgb(20 16 10 / 8%));
 }
 
+.witch-expression-image {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: bottom center;
+  pointer-events: none;
+  filter: drop-shadow(0 8px 10px rgb(20 16 10 / 8%));
+}
+
+.witch-expression-image[hidden] {
+  display: none;
+}
+
+html[data-theme="dark"] .witch-expression-image {
+  filter: saturate(0.88) hue-rotate(6deg) brightness(0.97)
+    drop-shadow(0 8px 10px rgb(20 16 10 / 10%));
+}
+
 /* 黑夜模式只把立绘往冷色轻轻推一点，不改变原图的明暗层次。 */
 html[data-theme="dark"] .witch-character-image {
   filter: saturate(0.88) hue-rotate(6deg) brightness(0.97)
@@ -5736,15 +5758,15 @@ html[data-theme="dark"] .witch-character-image {
   max-width: 100%;
   max-height: 100%;
   aspect-ratio: 720 / 710;
-  --witch-idle-distance: 6px;
-  --witch-idle-duration: 7s;
+  --witch-idle-distance: 2px;
+  --witch-idle-duration: 8s;
   animation: witch-fade 420ms ease-out both,
     witch-idle var(--witch-idle-duration) ease-in-out infinite;
 }
 
 .witch-assistant.is-drowsy .witch-portrait {
-  --witch-idle-distance: 2px;
-  --witch-idle-duration: 12s;
+  --witch-idle-distance: 1px;
+  --witch-idle-duration: 13s;
 }
 
 /* 头发边缘的弱光：同一张立绘加青色投影垫在底层，只动画透明度，不逐帧重算滤镜。 */
@@ -5762,6 +5784,55 @@ html[data-theme="dark"] .witch-character-image {
   animation: witch-rim 7s ease-in-out infinite;
 }
 
+.witch-character-main-action {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.witch-character-main-action:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* 局部互动热区只在完整桌面立绘上出现。它们不画可见按钮，
+   但保留键盘焦点轮廓和足够大的命中区域。 */
+.witch-hotspot {
+  position: absolute;
+  z-index: 4;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.witch-hotspot:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.witch-hotspot-head {
+  left: 68%;
+  top: 25%;
+  width: 27%;
+  height: 30%;
+  transform: translate(-50%, -50%);
+}
+
+.witch-hotspot-book {
+  left: 80%;
+  top: 77%;
+  width: 30%;
+  height: 34%;
+  transform: translate(-50%, -50%) rotate(-8deg);
+  border-radius: 18px;
+}
+
 /* 悬空的蓝色方块是从立绘里抠出来的独立入口，绕自身中心持续旋转。 */
 .witch-cube-action {
   position: absolute;
@@ -5773,7 +5844,7 @@ html[data-theme="dark"] .witch-character-image {
   background: transparent;
   cursor: pointer;
   transform: translate(-50%, -50%);
-  z-index: 2;
+  z-index: 5;
   visibility: hidden;
 }
 
@@ -5837,10 +5908,6 @@ html[data-theme="dark"] .witch-cube {
 
 .witch-assistant[data-witch-state="rolling"] .witch-cube {
   animation: witch-cube-roll 500ms cubic-bezier(0.22, 0.8, 0.28, 1) both;
-}
-
-.witch-assistant[data-witch-state="speaking"] .witch-character-image {
-  animation: witch-speaking-nod 520ms cubic-bezier(0.34, 1.4, 0.64, 1) both;
 }
 
 .witch-cube,
@@ -6160,6 +6227,13 @@ html[data-theme="dark"] .witch-forehead-star {
   gap: 6px;
 }
 
+/* 故事选项按内容占满一行，长句换行时仍从同一起点阅读。 */
+.witch-actions > .witch-action[data-story-choice] {
+  grid-column: 1 / -1;
+  padding: 7px 12px;
+  text-align: left;
+}
+
 .witch-action,
 .witch-mobile-action,
 .witch-mobile-close,
@@ -6280,18 +6354,6 @@ html[data-theme="dark"] .witch-forehead-star {
   100% {
     transform: rotate(715deg) scale(1.04);
     filter: drop-shadow(0 0 7px rgb(160 230 250 / 70%));
-  }
-}
-
-@keyframes witch-speaking-nod {
-  0% {
-    transform: translateY(0) scale(1);
-  }
-  42% {
-    transform: translateY(-3px) scale(1.004);
-  }
-  100% {
-    transform: translateY(0) scale(1);
   }
 }
 
@@ -6422,10 +6484,14 @@ body.is-white-ship-departing .witch-cube {
 
   .witch-portrait {
     width: 72px;
-    --witch-idle-distance: 3px;
+    --witch-idle-distance: 1px;
   }
 
   /* 迷你入口仍保留白船方块作为主入口，只隐藏放大后容易变成噪点的轮廓光。 */
+  .witch-hotspot {
+    display: none;
+  }
+
   .witch-cube-action {
     display: block;
     left: 110%;
@@ -6718,6 +6784,7 @@ body.is-white-ship-departing .witch-cube {
 
 @media (prefers-reduced-motion: reduce) {
   .witch-character-image,
+  .witch-expression-image,
   .witch-portrait,
   .witch-character-glow,
   .witch-cube-action,
