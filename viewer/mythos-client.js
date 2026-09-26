@@ -51,6 +51,11 @@
     }
     function failed() {
       settled();
+      try {
+        global.dispatchEvent(new CustomEvent("mythos:connection-error"));
+      } catch (eventError) {
+        /* 连接提示不可用时仍保留原请求错误。 */
+      }
       if (controller && controller.signal.aborted) {
         throw new Error(
           "请求超时（" + Math.round(timeoutMs / 1000) + " 秒没有响应）。请检查网络后重试。",
@@ -67,7 +72,14 @@
               (body && (body.error || body.msg || body.message)) ||
               "请求失败 (" + res.status + ")";
             if (typeof msg === "object") msg = JSON.stringify(msg);
-            throw new Error(msg);
+            var error = new Error(msg);
+            error.status = res.status;
+            throw error;
+          }
+          try {
+            global.dispatchEvent(new CustomEvent("mythos:connection-restored"));
+          } catch (eventError) {
+            /* 连接提示不可用时仍保留原请求结果。 */
           }
           // 服务端返回 { ok, data }。
           if (body && body.data !== undefined && body.ok !== undefined) {
@@ -77,6 +89,7 @@
         },
         function (parseError) {
           settled();
+          parseError.status = res.status;
           throw parseError;
         },
       );
@@ -98,6 +111,54 @@
     },
     getEditionAwards: function (editionSlug) {
       return call("getEditionAwards", { editionSlug: editionSlug });
+    },
+    getReadingShelf: function () {
+      return call("getReadingShelf");
+    },
+    syncReadingShelf: function (entries) {
+      return call("syncReadingShelf", { entries: entries || [] });
+    },
+    saveReadingState: function (entry) {
+      return call("saveReadingState", entry || {});
+    },
+    clearReadingShelf: function () {
+      return call("clearReadingShelf");
+    },
+    getMyRatingWorkIds: function () {
+      return call("getMyRatingWorkIds");
+    },
+    getCommentNotifications: function () {
+      return call("getCommentNotifications");
+    },
+    markCommentNotificationRead: function (id) {
+      return call("markCommentNotificationRead", { id: id });
+    },
+    markAllCommentNotificationsRead: function () {
+      return call("markAllCommentNotificationsRead");
+    },
+    dismissCommentNotification: function (id) {
+      return call("dismissCommentNotification", { id: id });
+    },
+    submitWorkFeedback: function (payload) {
+      return call("submitWorkFeedback", payload || {});
+    },
+    submitCommentReport: function (payload) {
+      return call("submitCommentReport", payload || {});
+    },
+    getAdminFeedback: function (kind) {
+      return call("getAdminFeedback", { kind: kind || "all" });
+    },
+    getFeedbackHistory: function (targetType, targetId) {
+      return call("getFeedbackHistory", { targetType: targetType, targetId: targetId });
+    },
+    updateWorkFeedback: function (payload) {
+      return call("updateWorkFeedback", payload || {});
+    },
+    updateCommentReport: function (payload) {
+      return call("updateCommentReport", payload || {});
+    },
+    getMyWorkFeedback: function () {
+      return call("getMyWorkFeedback");
     },
     adminGetEditionPhaseState: function (editionSlug) {
       return call("adminGetEditionPhaseState", { editionSlug: editionSlug });

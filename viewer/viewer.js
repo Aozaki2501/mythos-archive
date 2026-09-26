@@ -15,7 +15,10 @@
   var SIDEBAR_KEY = "mythos.sidebar.collapsed";
   var THEME_KEY = "mythos.theme";
   var READING_KEY = "mythos.reading.v1";
+  var READING_SHELF_KEY = "mythos.reading-shelf.v1";
   var READING_SETTINGS_KEY = "mythos.reading.settings.v1";
+  var CATALOGUE_SESSION_KEY = "mythos.catalogue.session.v1";
+  var COMMENT_DRAFT_PREFIX = "mythos.comment-draft.v1::";
   var READING_LIMIT = 12;
   var DEFAULT_ADMIN_QQ = "10001";
   var RATING_PROGRESS_EDITION = "2026";
@@ -392,7 +395,11 @@
   function smoothScrollToId(id) {
     var target = document.getElementById(id);
     if (!target) return;
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    target.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
+  }
+
+  function prefersReducedMotion() {
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   }
 
   /* ---------- 存储 ---------- */
@@ -516,9 +523,21 @@
     }
   }
 
-  function loadReadingState() {
+  function readingScopeOfCurrentSession() {
+    var currentSession = store && store.session;
+    if (currentSession && currentSession.role !== "visitor" && currentSession.qq) {
+      return "account:" + String(currentSession.qq);
+    }
+    return "device";
+  }
+
+  function scopedReadingKey(key, scope) {
+    return scope === "device" ? key : key + "::" + encodeURIComponent(scope.slice("account:".length));
+  }
+
+  function loadReadingState(storageKey) {
     try {
-      var raw = localStorage.getItem(READING_KEY);
+      var raw = localStorage.getItem(storageKey || READING_KEY);
       var parsed = raw ? JSON.parse(raw) : null;
       if (parsed && parsed.entries && typeof parsed.entries === "object") {
         return { entries: parsed.entries };
@@ -529,7 +548,40 @@
     return { entries: {} };
   }
 
-  var readingState = loadReadingState();
+  function loadReadingShelf(storageKey) {
+    try {
+      var raw = localStorage.getItem(storageKey || READING_SHELF_KEY);
+      var parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && parsed.entries && typeof parsed.entries === "object") {
+        return {
+          entries: parsed.entries,
+          generation: Math.max(0, Number(parsed.generation) || 0),
+        };
+      }
+    } catch (err) {
+      /* ignore */
+    }
+    return { entries: {}, generation: 0 };
+  }
+
+  var activeReadingScope = readingScopeOfCurrentSession();
+  var activeReadingStateKey = scopedReadingKey(READING_KEY, activeReadingScope);
+  var activeReadingShelfKey = scopedReadingKey(READING_SHELF_KEY, activeReadingScope);
+  var readingState = loadReadingState(activeReadingStateKey);
+  var readingShelf = loadReadingShelf(activeReadingShelfKey);
+  var guestReadingState = loadReadingState(READING_KEY);
+
+  function activateReadingScope() {
+    var nextScope = readingScopeOfCurrentSession();
+    if (nextScope === activeReadingScope) return false;
+    if (activeReadingScope === "device") guestReadingState = readingState;
+    activeReadingScope = nextScope;
+    activeReadingStateKey = scopedReadingKey(READING_KEY, activeReadingScope);
+    activeReadingShelfKey = scopedReadingKey(READING_SHELF_KEY, activeReadingScope);
+    readingState = loadReadingState(activeReadingStateKey);
+    readingShelf = loadReadingShelf(activeReadingShelfKey);
+    return true;
+  }
 
   var DEFAULT_READING_SETTINGS = {
     fontSize: 18,
@@ -560,7 +612,7 @@
 
   function persistReadingState() {
     try {
-      localStorage.setItem(READING_KEY, JSON.stringify(readingState));
+      localStorage.setItem(activeReadingStateKey, JSON.stringify(readingState));
     } catch (err) {
       /* ignore */
     }
@@ -573,7 +625,7 @@
   }
 
   function readingEntryOf(id) {
-    return readingState.entries[id] || null;
+    return readingState.entries[id] || readingShelf.entries[id] || null;
   }
 
   function recentReadingEntries() {
@@ -589,6 +641,7 @@
           edition: edition,
           work: work,
           progress: clampReadingProgress(entry.progress),
+          markedReadAt: entry.markedReadAt || "",
           updatedAt: entry.updatedAt || "",
         };
       })
@@ -607,8 +660,13 @@
       title: work.title,
       no: work.no,
       progress: previous ? clampReadingProgress(previous.progress) : 0,
+      position: previous && previous.position ? previous.position : null,
+      markedReadAt: previous && previous.markedReadAt ? previous.markedReadAt : "",
       updatedAt: new Date().toISOString(),
     };
+    readingShelf.entries[id] = Object.assign({}, readingShelf.entries[id] || {}, readingState.entries[id]);
+    persistReadingShelf();
+    queueReadingStateSync(id);
     var entries = recentReadingEntries();
     entries.slice(READING_LIMIT).forEach(function (entry) {
       delete readingState.entries[entry.id];
@@ -617,13 +675,278 @@
     return id;
   }
 
-  function saveReadingProgress(id, value) {
+  function saveReadingProgress(id, value, position) {
     var entry = readingEntryOf(id);
     if (!entry) return;
     entry.progress = clampReadingProgress(value);
+    if (position) entry.position = position;
     entry.updatedAt = new Date().toISOString();
     readingState.entries[id] = entry;
+    readingShelf.entries[id] = Object.assign({}, readingShelf.entries[id] || {}, entry);
     persistReadingState();
+    persistReadingShelf();
+    queueReadingStateSync(id);
+  }
+
+  function setReadingMarkedRead(id, marked) {
+    var entry = readingEntryOf(id);
+    if (!entry) {
+      var item = readingShelfWork(id);
+      if (!item) return;
+      entry = {
+        editionSlug: item.edition.slug,
+        workSlug: item.work.slug,
+        title: item.work.title,
+        no: item.work.no,
+        progress: 0,
+        position: null,
+        laterAt: "",
+        updatedAt: "",
+      };
+    }
+    entry.markedReadAt = marked ? (entry.markedReadAt || new Date().toISOString()) : "";
+    entry.updatedAt = new Date().toISOString();
+    readingState.entries[id] = entry;
+    readingShelf.entries[id] = Object.assign({}, readingShelf.entries[id] || {}, entry);
+    persistReadingState();
+    persistReadingShelf();
+    queueReadingStateSync(id);
+  }
+
+  function persistReadingShelf() {
+    try {
+      localStorage.setItem(activeReadingShelfKey, JSON.stringify(readingShelf));
+    } catch (err) {
+      /* ignore */
+    }
+  }
+
+  function setReadingLater(id, enabled) {
+    var existing = readingShelf.entries[id] || readingEntryOf(id) || {};
+    var editionSlug = String(id || "").split("/")[0];
+    var workSlug = String(id || "").slice(editionSlug.length + 1);
+    var edition = findEdition(editionSlug);
+    var work = edition && findWork(edition, workSlug);
+    if (!work) return;
+    existing.editionSlug = edition.slug;
+    existing.workSlug = work.slug;
+    existing.title = work.title;
+    existing.no = work.no;
+    existing.laterAt = enabled ? (existing.laterAt || new Date().toISOString()) : "";
+    existing.updatedAt = new Date().toISOString();
+    readingShelf.entries[id] = existing;
+    persistReadingShelf();
+    queueReadingStateSync(id);
+  }
+
+  var readingSyncTimers = {};
+  var readingSyncInflight = {};
+
+  function queueReadingStateSync(id) {
+    var user = currentUser();
+    if (!USE_CLOUD || !user || !id) return;
+    if (readingSyncTimers[id]) window.clearTimeout(readingSyncTimers[id]);
+    readingSyncTimers[id] = window.setTimeout(function () {
+      delete readingSyncTimers[id];
+      var entry = readingShelf.entries[id];
+      if (!entry || !currentUser() || currentUser().qq !== user.qq) return;
+      var request = {
+        workId: id,
+        progress: clampReadingProgress(entry.progress),
+        position: entry.position || null,
+        markedReadAt: entry.markedReadAt || "",
+        laterAt: entry.laterAt || "",
+        updatedAt: entry.updatedAt || new Date().toISOString(),
+        generation: readingShelf.generation,
+      };
+      readingSyncInflight[id] = window.MythosAPI.call("saveReadingState", request)
+        .then(function (data) {
+          if (!currentUser() || currentUser().qq !== user.qq || !data) return;
+          if (Number(data.generation) > readingShelf.generation) {
+            return syncCloudReadingShelf();
+          }
+          if (data.entry) {
+            mergeReadingShelfEntries([data.entry], false);
+          }
+        })
+        .catch(function () {
+          // 本机副本已安全保存；下次打开「我的阅读」或继续阅读时重试。
+        })
+        .then(function () { delete readingSyncInflight[id]; });
+    }, 900);
+  }
+
+  function mergeReadingShelfEntries(entries, persist) {
+    var recent = false;
+    (entries || []).forEach(function (entry) {
+      if (!entry || !entry.workId) return;
+      var parts = String(entry.workId).split("/");
+      if (parts.length < 2) return;
+      var edition = findEdition(parts[0]);
+      var work = edition && findWork(edition, parts.slice(1).join("/"));
+      if (!work) return;
+      var current = readingShelf.entries[entry.workId];
+      if (current && String(current.updatedAt || "") >= String(entry.updatedAt || "")) return;
+      var next = {
+        editionSlug: edition.slug,
+        workSlug: work.slug,
+        title: work.title,
+        no: work.no,
+        progress: clampReadingProgress(entry.progress),
+        position: entry.position || null,
+        markedReadAt: entry.markedReadAt || "",
+        laterAt: entry.laterAt || "",
+        updatedAt: entry.updatedAt || "",
+      };
+      readingShelf.entries[entry.workId] = next;
+      if (!readingState.entries[entry.workId] || String(next.updatedAt) > String(readingState.entries[entry.workId].updatedAt || "")) {
+        readingState.entries[entry.workId] = next;
+        recent = true;
+      }
+    });
+    if (persist !== false) {
+      persistReadingShelf();
+      if (recent) {
+        var recentEntries = recentReadingEntries();
+        recentEntries.slice(READING_LIMIT).forEach(function (entry) { delete readingState.entries[entry.id]; });
+        persistReadingState();
+      }
+    }
+  }
+
+  function applyCloudReadingShelf(data) {
+    var remoteGeneration = Math.max(0, Number(data && data.generation) || 0);
+    if (remoteGeneration > readingShelf.generation) {
+      readingShelf = { entries: {}, generation: remoteGeneration };
+      readingState = { entries: {} };
+      persistReadingState();
+      persistReadingShelf();
+    } else if (remoteGeneration < readingShelf.generation) {
+      throw new Error("本机阅读记录版本比云端新，请刷新页面后重试同步。");
+    }
+    mergeReadingShelfEntries((data && data.entries) || [], false);
+    persistReadingShelf();
+    return remoteGeneration;
+  }
+
+  function syncCloudReadingShelf() {
+    var user = currentUser();
+    if (!USE_CLOUD || !user) return Promise.resolve([]);
+    var targetQq = user.qq;
+    return window.MythosAPI.call("getReadingShelf")
+      .then(function (data) {
+        if (!currentUser() || currentUser().qq !== targetQq) return [];
+        var generation = applyCloudReadingShelf(data);
+        var localEntries = Object.keys(readingShelf.entries).map(function (id) {
+          var entry = readingShelf.entries[id];
+          return {
+            workId: id,
+            progress: clampReadingProgress(entry.progress),
+            position: entry.position || null,
+            markedReadAt: entry.markedReadAt || "",
+            laterAt: entry.laterAt || "",
+            updatedAt: entry.updatedAt || new Date().toISOString(),
+          };
+        });
+        return window.MythosAPI.call("syncReadingShelf", {
+          generation: generation,
+          entries: localEntries,
+        })
+          .then(function (result) {
+            if (currentUser() && currentUser().qq === targetQq) {
+              applyCloudReadingShelf(result);
+            }
+            return (result && result.entries) || [];
+          });
+      })
+      .catch(function (error) { throw error; });
+  }
+
+  function readingTextHash(value) {
+    var text = String(value || "");
+    var hash = 2166136261;
+    for (var i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36);
+  }
+
+  function prepareReadingAnchors(body, contentVersion) {
+    var paragraphs = [];
+    var occurrences = Object.create(null);
+    Array.prototype.forEach.call(body.querySelectorAll("p"), function (paragraph) {
+      var text = String(paragraph.textContent || "").replace(/\s+/g, " ").trim();
+      if (!text) return;
+      var textHash = readingTextHash(text);
+      occurrences[textHash] = (occurrences[textHash] || 0) + 1;
+      var anchor = "p-" + textHash + "-" + occurrences[textHash];
+      paragraph.setAttribute("data-reading-anchor", anchor);
+      paragraphs.push(paragraph);
+    });
+    var normalizedBody = paragraphs.map(function (paragraph) {
+      return String(paragraph.textContent || "").replace(/\s+/g, " ").trim();
+    }).join("\n");
+    return {
+      body: body,
+      paragraphs: paragraphs,
+      version: String(contentVersion || readingTextHash(normalizedBody)),
+    };
+  }
+
+  function readingAnchorAtPosition(anchorData) {
+    if (!anchorData || !anchorData.paragraphs.length) return null;
+    var guideY = Math.max(120, Math.min(window.innerHeight * 0.42, window.innerHeight - 80));
+    var selected = null;
+    var nearestDistance = Infinity;
+    var selectedOffset = 0;
+    anchorData.paragraphs.forEach(function (paragraph) {
+      var rect = paragraph.getBoundingClientRect();
+      var distance = rect.top > guideY
+        ? rect.top - guideY
+        : rect.bottom < guideY
+          ? guideY - rect.bottom
+          : 0;
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        selected = paragraph;
+        selectedOffset = rect.height > 0
+          ? Math.max(0, Math.min(1, (guideY - rect.top) / rect.height))
+          : 0;
+      }
+    });
+    if (!selected) return null;
+    return {
+      version: anchorData.version,
+      anchor: selected.getAttribute("data-reading-anchor") || "",
+      offset: selectedOffset,
+    };
+  }
+
+  function restoreReadingAnchor(anchorData, position) {
+    if (!anchorData || !position || position.version !== anchorData.version || !position.anchor) {
+      return false;
+    }
+    var paragraph = anchorData.paragraphs.filter(function (item) {
+      return item.getAttribute("data-reading-anchor") === position.anchor;
+    })[0];
+    if (!paragraph) return false;
+    var rect = paragraph.getBoundingClientRect();
+    var offset = Math.max(0, Math.min(1, Number(position.offset) || 0));
+    var guideY = Math.max(120, Math.min(window.innerHeight * 0.42, window.innerHeight - 80));
+    window.scrollTo(0, Math.max(0, window.scrollY + rect.top + rect.height * offset - guideY));
+    return true;
+  }
+
+  function readingBodyProgress(body) {
+    if (!body) return 0;
+    var rect = body.getBoundingClientRect();
+    var start = window.scrollY + rect.top;
+    var end = window.scrollY + rect.bottom;
+    var span = end - start;
+    if (span <= 0) return 0;
+    var readingLine = window.scrollY + window.innerHeight * 0.72;
+    return clampReadingProgress((readingLine - start) / span);
   }
 
   function applyCloudAuthData(data) {
@@ -648,6 +971,24 @@
         enabled: data.user.enabled !== false,
         pass: "",
       };
+    }
+    var scopeChanged = activateReadingScope();
+    if (scopeChanged && USE_CLOUD) {
+      cloudAccountScopeVersion += 1;
+      store.ratings = {};
+      store.comments = {};
+      store.stars = {};
+      cloudBundleLoaded = Object.create(null);
+      cloudBundleInflight = Object.create(null);
+      cloudStarsLoaded = Object.create(null);
+      cloudStarsInflight = Object.create(null);
+      cloudRatingProgress = Object.create(null);
+      cloudRatingProgressInflight = Object.create(null);
+      cloudRatingProgressRefreshInflight = Object.create(null);
+    }
+    if (currentUser()) {
+      syncCloudReadingShelf().catch(function () {});
+      loadCommentNotifications(true).catch(function () {});
     }
   }
 
@@ -790,6 +1131,11 @@
   function isArchivedEdition(value) {
     var edition = typeof value === "string" ? findEdition(value) : value;
     return !!edition && edition.status === "archived";
+  }
+
+  function isStaticPublicEdition(value) {
+    var edition = typeof value === "string" ? findEdition(value) : value;
+    return !!edition && (edition.status === "archived" || edition.status === "published");
   }
 
   function editionStatusLabel(value) {
@@ -1057,7 +1403,9 @@
   var cloudAwardsLoaded = {};
   var cloudAwardsInflight = {};
   var cloudAwards = {};
+  var cloudAccountScopeVersion = 0;
   var cloudContent = {};
+  var activeReaderRerender = null;
   var staticContent = {};
   var staticContentInflight = {};
   var staticContentCacheName =
@@ -1315,10 +1663,13 @@
     if (!USE_CLOUD) return Promise.resolve();
     if (!force && cloudBundleLoaded[id]) return Promise.resolve();
     if (!force && cloudBundleInflight[id]) return cloudBundleInflight[id];
-    cloudBundleInflight[id] = window.MythosAPI.call("getWorkBundle", {
+    var scopeVersion = cloudAccountScopeVersion;
+    var inflightMap = cloudBundleInflight;
+    var request = window.MythosAPI.call("getWorkBundle", {
       workId: id,
     })
       .then(function (data) {
+        if (scopeVersion !== cloudAccountScopeVersion) return;
         var acceptedContent = hydrateWorkBundle(id, data || {});
         if (acceptedContent) {
           cloudBundleLoaded[id] = true;
@@ -1330,20 +1681,22 @@
           return;
         }
         return loadStaticWorkContent(id).then(function (content) {
+          if (scopeVersion !== cloudAccountScopeVersion) return;
           cloudContent[id] = content;
           cloudBundleLoaded[id] = true;
         });
       })
       .then(
         function () {
-          delete cloudBundleInflight[id];
+          if (inflightMap[id] === request) delete inflightMap[id];
         },
         function (err) {
-          delete cloudBundleInflight[id];
+          if (inflightMap[id] === request) delete inflightMap[id];
           throw err;
         },
       );
-    return cloudBundleInflight[id];
+    inflightMap[id] = request;
+    return request;
   }
 
   function loadCloudStars(editionSlug, force) {
@@ -1355,10 +1708,13 @@
     if (!force && cloudStarsInflight[editionSlug]) {
       return cloudStarsInflight[editionSlug];
     }
-    cloudStarsInflight[editionSlug] = window.MythosAPI.call("getStars", {
+    var scopeVersion = cloudAccountScopeVersion;
+    var inflightMap = cloudStarsInflight;
+    var request = window.MythosAPI.call("getStars", {
       editionSlug: editionSlug,
     })
       .then(function (data) {
+        if (scopeVersion !== cloudAccountScopeVersion) return;
         var bag = store.stars[editionSlug] || {};
         if (Array.isArray(bag)) bag = {};
         bag[starKey()] = (data && data.stars) || [];
@@ -1367,14 +1723,15 @@
       })
       .then(
         function () {
-          delete cloudStarsInflight[editionSlug];
+          if (inflightMap[editionSlug] === request) delete inflightMap[editionSlug];
         },
         function (err) {
-          delete cloudStarsInflight[editionSlug];
+          if (inflightMap[editionSlug] === request) delete inflightMap[editionSlug];
           throw err;
         },
       );
-    return cloudStarsInflight[editionSlug];
+    inflightMap[editionSlug] = request;
+    return request;
   }
 
   function loadCloudEditionInsights(editionSlug, force) {
@@ -1825,32 +2182,38 @@
     }
     if (cloudRatingProgressInflight[editionSlug]) {
       if (!force) return cloudRatingProgressInflight[editionSlug];
+      var scopeVersion = cloudAccountScopeVersion;
+      var refreshMap = cloudRatingProgressRefreshInflight;
       var currentRequest = cloudRatingProgressInflight[editionSlug];
       var refreshRequest = currentRequest.then(
-        function () { return requestCloudRatingProgress(editionSlug); },
-        function () { return requestCloudRatingProgress(editionSlug); },
+        function () { return scopeVersion === cloudAccountScopeVersion ? requestCloudRatingProgress(editionSlug) : null; },
+        function () { return scopeVersion === cloudAccountScopeVersion ? requestCloudRatingProgress(editionSlug) : null; },
       );
-      cloudRatingProgressRefreshInflight[editionSlug] = refreshRequest.then(
+      var refreshPromise = refreshRequest.then(
         function (data) {
-          delete cloudRatingProgressRefreshInflight[editionSlug];
+          if (refreshMap[editionSlug] === refreshPromise) delete refreshMap[editionSlug];
           return data;
         },
         function (error) {
-          delete cloudRatingProgressRefreshInflight[editionSlug];
+          if (refreshMap[editionSlug] === refreshPromise) delete refreshMap[editionSlug];
           throw error;
         },
       );
-      return cloudRatingProgressRefreshInflight[editionSlug];
+      refreshMap[editionSlug] = refreshPromise;
+      return refreshPromise;
     }
     return requestCloudRatingProgress(editionSlug);
   }
 
   function requestCloudRatingProgress(editionSlug) {
+    var scopeVersion = cloudAccountScopeVersion;
+    var inflightMap = cloudRatingProgressInflight;
     cloudRatingProgress[editionSlug] = { status: "loading", editionSlug: editionSlug };
-    cloudRatingProgressInflight[editionSlug] = window.MythosAPI.call(
+    var request = window.MythosAPI.call(
       "getMyRatingProgress",
       { editionSlug: editionSlug },
     ).then(function (data) {
+      if (scopeVersion !== cloudAccountScopeVersion) return null;
       var achievements = Array.isArray(data && data.achievements)
         ? data.achievements
         : [];
@@ -1887,6 +2250,7 @@
       }
       return cloudRatingProgress[editionSlug];
     }).catch(function (error) {
+      if (scopeVersion !== cloudAccountScopeVersion) throw error;
       cloudRatingProgress[editionSlug] = {
         status: "error",
         editionSlug: editionSlug,
@@ -1895,13 +2259,14 @@
       refreshRatingProgressViews(editionSlug);
       throw error;
     }).then(function (data) {
-      delete cloudRatingProgressInflight[editionSlug];
+      if (inflightMap[editionSlug] === request) delete inflightMap[editionSlug];
       return data;
     }, function (error) {
-      delete cloudRatingProgressInflight[editionSlug];
+      if (inflightMap[editionSlug] === request) delete inflightMap[editionSlug];
       throw error;
     });
-    return cloudRatingProgressInflight[editionSlug];
+    inflightMap[editionSlug] = request;
+    return request;
   }
 
   function claimPendingRatingAchievement(editionSlug) {
@@ -2336,6 +2701,57 @@
     return store.comments[id] || [];
   }
 
+  function commentDraftStorageKey(user, workIdValue, targetId) {
+    if (!user || !user.qq) return "";
+    return COMMENT_DRAFT_PREFIX + encodeURIComponent(String(user.qq)) + "::" +
+      encodeURIComponent(String(workIdValue)) + "::" + encodeURIComponent(targetId || "root");
+  }
+
+  function readCommentDraft(key) {
+    if (!key) return null;
+    try {
+      var raw = localStorage.getItem(key);
+      var draft = raw ? JSON.parse(raw) : null;
+      return draft && typeof draft === "object" ? draft : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function writeCommentDraft(key, draft) {
+    if (!key) return false;
+    try {
+      localStorage.setItem(key, JSON.stringify(draft));
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function removeCommentDraft(key) {
+    if (!key) return;
+    try {
+      localStorage.removeItem(key);
+    } catch (err) {
+      /* 保存失败不应影响当前输入。 */
+    }
+  }
+
+  function clearCommentDraftsForAccount(qq) {
+    var prefix = COMMENT_DRAFT_PREFIX + encodeURIComponent(String(qq || "")) + "::";
+    var keys = [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var key = localStorage.key(i);
+        if (key && key.indexOf(prefix) === 0) keys.push(key);
+      }
+      keys.forEach(function (key) { localStorage.removeItem(key); });
+      return keys.length;
+    } catch (err) {
+      return -1;
+    }
+  }
+
   // 手机端输入较长评论时，让输入区跟随内容增加高度；到五行后改为框内滚动，
   // 避免光标持续下移而让前面的文字看起来像是“消失”。
   function fitCommentTextarea(textarea) {
@@ -2367,12 +2783,121 @@
     editionSlug: (editions[0] && editions[0].slug) || "",
     workSlug: "",
     keyword: "",
+    catalogueKeyword: "",
     view: "home",
     onlyUnrated: false,
     catalogueSort: "number",
     catalogueLength: "all",
+    catalogueRandomSeed: "",
+    catalogueEditionSlug: "",
     refreshEditionList: null,
   };
+
+  function readCatalogueSessions() {
+    try {
+      var raw = sessionStorage.getItem(CATALOGUE_SESSION_KEY);
+      var parsed = raw ? JSON.parse(raw) : null;
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (err) {
+      return {};
+    }
+  }
+
+  function saveCatalogueSession(editionSlug, patch) {
+    try {
+      var sessions = readCatalogueSessions();
+      sessions[editionSlug] = Object.assign({}, sessions[editionSlug] || {}, patch);
+      sessionStorage.setItem(CATALOGUE_SESSION_KEY, JSON.stringify(sessions));
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function catalogueStateFromUrlOrSession(editionSlug) {
+    var sessions = readCatalogueSessions();
+    var saved = sessions[editionSlug] || {};
+    var params = new URLSearchParams(window.location.search);
+    var fromUrl = params.get("archiveEdition") === editionSlug;
+    var sort = fromUrl ? params.get("sort") : saved.sort;
+    var length = fromUrl ? params.get("length") : saved.length;
+    return {
+      keyword: fromUrl ? params.get("q") || "" : saved.keyword || "",
+      sort: ["number", "length-asc", "length-desc", "random"].indexOf(sort) !== -1 ? sort : "number",
+      length: ["all", "short", "medium", "long"].indexOf(length) !== -1 ? length : "all",
+      onlyUnrated: fromUrl ? params.get("unrated") === "1" : !!saved.onlyUnrated,
+      randomSeed: fromUrl ? params.get("seed") || saved.randomSeed || "" : saved.randomSeed || "",
+      scroll: saved.scroll || null,
+    };
+  }
+
+  function catalogueStateIsDefault() {
+    return !state.catalogueKeyword.trim() && !state.onlyUnrated &&
+      state.catalogueSort === "number" && state.catalogueLength === "all";
+  }
+
+  function persistCatalogueState(editionSlug) {
+    var scrollState = (readCatalogueSessions()[editionSlug] || {}).scroll || null;
+    var snapshot = {
+      keyword: state.catalogueKeyword,
+      sort: state.catalogueSort,
+      length: state.catalogueLength,
+      onlyUnrated: state.onlyUnrated,
+      randomSeed: state.catalogueRandomSeed,
+      scroll: scrollState,
+    };
+    saveCatalogueSession(editionSlug, snapshot);
+
+    try {
+      var url = new URL(window.location.href);
+      ["archiveEdition", "sort", "length", "unrated", "q", "seed"].forEach(function (key) {
+        url.searchParams.delete(key);
+      });
+      if (!catalogueStateIsDefault()) {
+        url.searchParams.set("archiveEdition", editionSlug);
+        if (state.catalogueSort !== "number") url.searchParams.set("sort", state.catalogueSort);
+        if (state.catalogueLength !== "all") url.searchParams.set("length", state.catalogueLength);
+        if (state.onlyUnrated) url.searchParams.set("unrated", "1");
+        if (state.catalogueKeyword.trim()) url.searchParams.set("q", state.catalogueKeyword.trim());
+        if (state.catalogueSort === "random" && state.catalogueRandomSeed) {
+          url.searchParams.set("seed", state.catalogueRandomSeed);
+        }
+      }
+      window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+    } catch (err) {
+      /* URL 不能改写时，会话状态仍可用于当前标签页恢复。 */
+    }
+  }
+
+  function saveCatalogueReturnPosition(editionSlug) {
+    var rows = Array.prototype.slice.call(document.querySelectorAll(".edition-index-row"));
+    var anchor = null;
+    rows.some(function (row) {
+      var rect = row.getBoundingClientRect();
+      if (rect.bottom <= 0) return false;
+      anchor = { workSlug: row.dataset.workSlug || "", offset: rect.top, y: window.scrollY };
+      return true;
+    });
+    saveCatalogueSession(editionSlug, { scroll: anchor, pendingReturn: true });
+  }
+
+  function restoreCatalogueReturnPosition(editionSlug) {
+    var sessions = readCatalogueSessions();
+    var saved = sessions[editionSlug] || {};
+    if (!saved.pendingReturn || !saved.scroll) return;
+    saveCatalogueSession(editionSlug, { pendingReturn: false });
+    window.requestAnimationFrame(function () {
+      var anchor = saved.scroll;
+      var rows = Array.prototype.slice.call(document.querySelectorAll(".edition-index-row"));
+      var row = rows.filter(function (item) { return item.dataset.workSlug === anchor.workSlug; })[0];
+      if (!row) {
+        window.scrollTo(0, Math.max(0, Number(anchor.y) || 0));
+        return;
+      }
+      var rect = row.getBoundingClientRect();
+      window.scrollTo(0, Math.max(0, window.scrollY + rect.top - (Number(anchor.offset) || 0)));
+    });
+  }
 
   var refs = {
     layout: document.getElementById("layout"),
@@ -2399,6 +2924,9 @@
     topMore: document.getElementById("top-more"),
     topMenu: document.getElementById("top-menu"),
     topResults: document.getElementById("top-results"),
+    topReading: document.getElementById("top-reading"),
+    topNotifications: document.getElementById("top-notifications"),
+    notificationCount: document.getElementById("notification-count"),
     authGate: document.getElementById("auth-gate"),
     accountBar: document.getElementById("account-bar"),
     accountHud: document.getElementById("account-hud"),
@@ -2435,17 +2963,21 @@
         ? readingProgressParts.getValue()
         : null;
       if (current !== null && current !== undefined) {
-        saveReadingProgress(activeReadingId, current);
+        var position = readingProgressParts.getPosition
+          ? readingProgressParts.getPosition()
+          : null;
+        saveReadingProgress(activeReadingId, current, position);
       }
     }
     activeReadingId = "";
     readingProgressParts = null;
   }
 
-  function startReadingTracking(edition, work, parts, restorePosition) {
+  function startReadingTracking(edition, work, parts, restorePosition, preferredPosition) {
     stopReadingTracking();
     var id = workId(edition.slug, work.slug);
     var remembered = readingEntryOf(id);
+    var anchorData = prepareReadingAnchors(parts.body, parts.contentVersion);
     activeReadingId = id;
     readingProgressParts = parts;
     var presenceLastY = window.scrollY;
@@ -2500,31 +3032,33 @@
     }
 
     function currentProgress() {
-      var root = document.scrollingElement || document.documentElement;
-      var max = Math.max(0, root.scrollHeight - window.innerHeight);
-      return max > 0 ? clampReadingProgress(window.scrollY / max) : 0;
+      return readingBodyProgress(parts.body);
     }
 
     function paintProgress(value) {
       var progress = clampReadingProgress(value);
       var percent = Math.round(progress * 100);
-      var progressLabel = percent ? "已读约 " + percent + "%" : "开始阅读";
+      var progressLabel = progress >= 1
+        ? "正文读到末尾"
+        : percent
+          ? "正文约 " + percent + "%"
+          : "开始阅读";
       parts.bar.style.width = percent + "%";
       parts.text.textContent = progressLabel;
       if (parts.compactText) {
         var totalChars = Number(parts.totalChars) || Number(work.chars) || 0;
         var remainingMinutes = totalChars ? Math.ceil((totalChars * (1 - progress)) / 400) : 0;
         var readingTime = progress >= 1
-          ? "已读完"
+          ? "正文读到末尾"
           : remainingMinutes
             ? (isMobileLayout() ? "约 " + remainingMinutes + " 分" : "还剩约 " + remainingMinutes + " 分钟")
             : "时长暂不可估";
         parts.compactText.textContent =
-          (percent ? "已读 " + percent + "%" : "开始阅读") + " · " + readingTime;
+          (percent ? "正文 " + percent + "%" : "开始阅读") + " · " + readingTime;
         parts.compactText.setAttribute(
           "aria-label",
-          (percent ? "已读约 " + percent + "%" : "尚未开始阅读") + "，" +
-            (progress >= 1 ? "已读完" : remainingMinutes ? "还剩约 " + remainingMinutes + " 分钟" : "阅读时长暂不可估"),
+          (progress >= 1 ? "正文阅读进度已到末尾" : percent ? "正文阅读进度约 " + percent + "%" : "尚未开始阅读") + "，" +
+            (progress >= 1 ? "不等于手动标记已读" : remainingMinutes ? "还剩约 " + remainingMinutes + " 分钟" : "阅读时长暂不可估"),
         );
       }
       if (parts.compactFill) parts.compactFill.style.width = percent + "%";
@@ -2540,6 +3074,9 @@
       parts.getValue = function () {
         return progress;
       };
+      parts.getPosition = function () {
+        return readingAnchorAtPosition(anchorData);
+      };
     }
 
     function scheduleSave() {
@@ -2548,23 +3085,43 @@
       if (readingScrollTimer) window.clearTimeout(readingScrollTimer);
       readingScrollTimer = window.setTimeout(function () {
         readingScrollTimer = null;
-        saveReadingProgress(id, currentProgress());
+        saveReadingProgress(id, currentProgress(), readingAnchorAtPosition(anchorData));
       }, 180);
     }
+
+    parts.refresh = function () {
+      paintProgress(currentProgress());
+      saveReadingProgress(id, currentProgress(), readingAnchorAtPosition(anchorData));
+    };
 
     readingScrollHandler = scheduleSave;
     window.addEventListener("scroll", readingScrollHandler, { passive: true });
     paintProgress(remembered ? remembered.progress : 0);
     resetWitchPresence();
 
-    if (restorePosition && remembered && remembered.progress > 0.02) {
-      window.requestAnimationFrame(function () {
-        var root = document.scrollingElement || document.documentElement;
-        var max = Math.max(0, root.scrollHeight - window.innerHeight);
-        if (max > 0) window.scrollTo(0, Math.round(max * remembered.progress));
+    var savedPosition = preferredPosition || (restorePosition && remembered && remembered.position);
+    if (savedPosition || (restorePosition && remembered && remembered.progress > 0.02)) {
+      function restore() {
+        if (activeReadingId !== id) return;
+        var restored = restoreReadingAnchor(anchorData, savedPosition);
+        if (!restored && restorePosition && remembered && remembered.progress > 0.02) {
+          var rect = parts.body.getBoundingClientRect();
+          var start = window.scrollY + rect.top;
+          var span = Math.max(0, rect.height);
+          var guideY = Math.max(120, Math.min(window.innerHeight * 0.72, window.innerHeight - 80));
+          if (span > 0) {
+            window.scrollTo(0, Math.max(0, start + span * remembered.progress - guideY));
+          }
+        }
         paintProgress(currentProgress());
         resetWitchPresence();
-      });
+      }
+      var fontsReady = document.fonts && document.fonts.ready;
+      if (fontsReady && typeof fontsReady.then === "function") {
+        fontsReady.then(function () { window.requestAnimationFrame(restore); });
+      } else {
+        window.requestAnimationFrame(restore);
+      }
     } else {
       paintProgress(currentProgress());
       resetWitchPresence();
@@ -2899,6 +3456,17 @@
   }
 
   function showAuthGate() {
+    activateReadingScope();
+    if (refs.authGate.hidden && activeReadingId && readingProgressParts) {
+      var progress = readingProgressParts.getValue ? readingProgressParts.getValue() : null;
+      if (progress !== null && progress !== undefined) {
+        saveReadingProgress(
+          activeReadingId,
+          progress,
+          readingProgressParts.getPosition ? readingProgressParts.getPosition() : null,
+        );
+      }
+    }
     if (window.MythosWitch && window.MythosWitch.hideForModal) {
       window.MythosWitch.hideForModal();
     }
@@ -2911,6 +3479,7 @@
   }
 
   function hideAuthGate() {
+    activateReadingScope();
     // 进入档案后才需要展示标题字体，避免它在启动阶段和接口、脚本抢带宽。
     document.documentElement.classList.add("is-archive");
     refs.authGate.hidden = true;
@@ -2937,7 +3506,7 @@
         "p",
         "auth-sub",
         USE_CLOUD
-          ? "已有账号直接登录；第一次使用请注册。访客无需账号。"
+          ? "阅读公开档案无需账号。登录后可评分、评论和收藏；首次使用需注册。"
           : "离线演示版：账号数据仅保存在本机浏览器。",
       ),
     );
@@ -3056,7 +3625,7 @@
         el(
           "p",
           "auth-hint",
-          "首次使用请点上面的「注册」：QQ 需在名单内，验证码会发到你的 QQ 邮箱。",
+          "首次使用请点上面的「注册」。QQ 需在调查员名单内；若不在名单内，请通过赛事公告联系管理员。",
         ),
       );
       if (USE_CLOUD) {
@@ -3650,6 +4219,53 @@
 
   var modalReturnFocus = null;
   var modalKeyHandler = null;
+  var modalFocusHandler = null;
+  var modalScrollLockState = null;
+
+  function lockModalBackgroundScroll() {
+    if (modalScrollLockState) return;
+    modalScrollLockState = {
+      scrollY: window.scrollY,
+      position: document.body.style.position,
+      top: document.body.style.top,
+      left: document.body.style.left,
+      right: document.body.style.right,
+      width: document.body.style.width,
+      overflow: document.body.style.overflow,
+    };
+    document.documentElement.classList.add("is-modal-open");
+    document.body.style.position = "fixed";
+    document.body.style.top = "-" + modalScrollLockState.scrollY + "px";
+    document.body.style.left = "0";
+    document.body.style.right = "0";
+    document.body.style.width = "100%";
+    document.body.style.overflow = "hidden";
+  }
+
+  function unlockModalBackgroundScroll() {
+    if (!modalScrollLockState) return;
+    var saved = modalScrollLockState;
+    modalScrollLockState = null;
+    document.documentElement.classList.remove("is-modal-open");
+    document.body.style.position = saved.position;
+    document.body.style.top = saved.top;
+    document.body.style.left = saved.left;
+    document.body.style.right = saved.right;
+    document.body.style.width = saved.width;
+    document.body.style.overflow = saved.overflow;
+    window.scrollTo(0, saved.scrollY);
+  }
+
+  function modalFocusableElements(dialog) {
+    return Array.prototype.filter.call(
+      dialog.querySelectorAll(
+        'a[href], area[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]',
+      ),
+      function (element) {
+        return element.getAttribute("aria-hidden") !== "true" && element.getClientRects().length > 0;
+      },
+    );
+  }
 
   function closeModal() {
     clear(refs.modalRoot);
@@ -3658,8 +4274,11 @@
       window.MythosWitch.restoreAfterModal();
     }
     if (modalKeyHandler) document.removeEventListener("keydown", modalKeyHandler);
+    if (modalFocusHandler) document.removeEventListener("focusin", modalFocusHandler);
     modalKeyHandler = null;
-    if (modalReturnFocus && typeof modalReturnFocus.focus === "function") {
+    modalFocusHandler = null;
+    unlockModalBackgroundScroll();
+    if (modalReturnFocus && modalReturnFocus.isConnected && typeof modalReturnFocus.focus === "function") {
       modalReturnFocus.focus();
     }
     modalReturnFocus = null;
@@ -3669,7 +4288,13 @@
     if (window.MythosWitch && window.MythosWitch.hideForModal) {
       window.MythosWitch.hideForModal();
     }
-    modalReturnFocus = document.activeElement;
+    var replacingModal = !refs.modalRoot.hidden;
+    if (!replacingModal) {
+      modalReturnFocus = document.activeElement;
+      lockModalBackgroundScroll();
+    }
+    if (modalKeyHandler) document.removeEventListener("keydown", modalKeyHandler);
+    if (modalFocusHandler) document.removeEventListener("focusin", modalFocusHandler);
     clear(refs.modalRoot);
     refs.modalRoot.hidden = false;
     var backdrop = el("div", "modal-backdrop");
@@ -3692,9 +4317,40 @@
     refs.modalRoot.appendChild(backdrop);
     refs.modalRoot.appendChild(dialog);
     modalKeyHandler = function (event) {
-      if (event.key === "Escape") closeModal();
+      var currentDialog = refs.modalRoot.querySelector(".modal-dialog");
+      if (!currentDialog) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeModal();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      var focusable = modalFocusableElements(currentDialog);
+      if (!focusable.length) {
+        event.preventDefault();
+        currentDialog.focus();
+        return;
+      }
+      var first = focusable[0];
+      var last = focusable[focusable.length - 1];
+      var active = document.activeElement;
+      if (event.shiftKey && (active === first || !currentDialog.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || !currentDialog.contains(active))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    modalFocusHandler = function (event) {
+      var currentDialog = refs.modalRoot.querySelector(".modal-dialog");
+      if (currentDialog && !currentDialog.contains(event.target)) {
+        var focusable = modalFocusableElements(currentDialog);
+        (focusable[0] || currentDialog).focus();
+      }
     };
     document.addEventListener("keydown", modalKeyHandler);
+    document.addEventListener("focusin", modalFocusHandler);
     closeBtn.focus();
   }
 
@@ -3835,6 +4491,30 @@
     body.appendChild(savePass);
 
     body.appendChild(el("hr", "modal-rule"));
+    body.appendChild(el("h3", "modal-sub", "本机评论草稿"));
+    body.appendChild(
+      el(
+        "p",
+        "modal-meta",
+        "评论草稿只保存在此设备，并按账号隔离。退出登录不会自动删除；需要时可在这里清除当前账号的草稿。",
+      ),
+    );
+    var draftStatus = el("p", "modal-meta");
+    draftStatus.setAttribute("aria-live", "polite");
+    var clearDrafts = el("button", "btn-ghost", "清除此账号的本机评论草稿");
+    clearDrafts.type = "button";
+    clearDrafts.addEventListener("click", function () {
+      var removed = clearCommentDraftsForAccount(user.qq);
+      draftStatus.textContent = removed < 0
+        ? "清除失败，请稍后重试。"
+        : removed
+          ? "已清除 " + removed + " 份本机评论草稿。"
+          : "当前账号没有保存的评论草稿。";
+    });
+    body.appendChild(clearDrafts);
+    body.appendChild(draftStatus);
+
+    body.appendChild(el("hr", "modal-rule"));
     var logout = el("button", "btn-ghost", "退出登录");
     logout.type = "button";
     logout.addEventListener("click", function () {
@@ -3905,6 +4585,142 @@
     store.settings.editions[slug] = st;
     persist();
     return Promise.resolve();
+  }
+
+  function openAdminFeedbackQueue() {
+    if (!isAdmin() || !USE_CLOUD) return;
+    var body = el("div", "modal-body admin-feedback-queue");
+    body.appendChild(backToAdminButton());
+    body.appendChild(el("p", "modal-meta", "反馈和举报只进入此管理队列；正文修改仍须通过现有正文编辑与版本历史流程。"));
+    var status = el("p", "modal-meta", "正在读取待处理记录…");
+    body.appendChild(status);
+    openModal("纠错与举报处理", body);
+
+    function renderQueue(data) {
+      clear(body);
+      body.appendChild(backToAdminButton());
+      body.appendChild(el("p", "modal-meta", "反馈和举报只进入此管理队列；正文修改仍须通过现有正文编辑与版本历史流程。"));
+      var records = [];
+      (data.workFeedback || []).forEach(function (item) { records.push(Object.assign({ targetType: "work" }, item)); });
+      (data.reports || []).forEach(function (item) { records.push(Object.assign({ targetType: "report" }, item)); });
+      records.sort(function (a, b) {
+        var pendingA = a.status === "pending" ? 0 : 1;
+        var pendingB = b.status === "pending" ? 0 : 1;
+        return pendingA - pendingB || String(b.createdAt).localeCompare(String(a.createdAt));
+      });
+      if (!records.length) {
+        body.appendChild(el("p", "reading-shelf-empty", "目前没有反馈或举报记录。"));
+        return;
+      }
+      records.forEach(function (record) {
+        var card = el("article", "admin-feedback-card");
+        var title = record.targetType === "report" ? "评论举报" : "作品问题反馈";
+        card.appendChild(el("h3", null, title + " · " + (record.workId || record.commentId || "")));
+        card.appendChild(el("p", "modal-meta",
+          "提交者：" + (record.reporterName || (record.reporterQq ? "QQ " + record.reporterQq : "用户")) +
+            " · " + formatTime(record.createdAt)));
+        if (record.targetType === "work") {
+          card.appendChild(el("p", "modal-meta", "类型：" + (({ content: "正文或排版", attachment: "附件", other: "其他" })[record.category] || "其他")));
+          if (record.selectedText) card.appendChild(el("blockquote", "feedback-selected-text", record.selectedText));
+          if (record.sourcePath) {
+            var source = el("a", "feedback-source-link", "打开反馈来源页面 →");
+            source.href = record.sourcePath;
+            source.target = "_blank";
+            source.rel = "noopener noreferrer";
+            card.appendChild(source);
+          }
+        } else {
+          card.appendChild(el("p", "modal-meta", "原因：" + (({ spam: "垃圾或广告", harassment: "骚扰或攻击", privacy: "泄露个人信息", other: "其他" })[record.reason] || "其他")));
+          card.appendChild(el("p", "feedback-comment-context", record.deletedAt ? "被举报的评论已删除。" : (record.commentBody || "评论内容不可用。")));
+        }
+        card.appendChild(el("p", "feedback-description", record.description || "未补充说明。"));
+        var controls = el("div", "admin-feedback-controls");
+        var stateLabel = el("label", "field-label", "处理状态");
+        var stateSelect = el("select", "auth-input");
+        [["pending", "待处理"], ["resolved", "已解决"], ["no_action", "无需处理"]].forEach(function (entry) {
+          var option = document.createElement("option");
+          option.value = entry[0];
+          option.textContent = entry[1];
+          stateSelect.appendChild(option);
+        });
+        stateSelect.value = record.status || "pending";
+        stateLabel.appendChild(stateSelect);
+        controls.appendChild(stateLabel);
+        var noteLabel = el("label", "field-label", "内部处理备注");
+        var note = el("textarea", "auth-input");
+        note.rows = 2;
+        note.maxLength = 1000;
+        note.value = record.adminNote || "";
+        noteLabel.appendChild(note);
+        controls.appendChild(noteLabel);
+        var actions = el("div", "reading-shelf-actions");
+        var save = el("button", "btn btn-tiny", "保存处理结果");
+        save.type = "button";
+        save.addEventListener("click", function () {
+          save.disabled = true;
+          var action = record.targetType === "report" ? "updateCommentReport" : "updateWorkFeedback";
+          window.MythosAPI.call(action, {
+            id: record.id,
+            status: stateSelect.value,
+            adminNote: note.value.trim(),
+          }).then(function () {
+            return window.MythosAPI.getAdminFeedback("all");
+          }).then(renderQueue).catch(function (error) {
+            save.disabled = false;
+            status.textContent = error.message || String(error);
+            body.insertBefore(status, body.children[1] || null);
+          });
+        });
+        actions.appendChild(save);
+        var history = el("button", "btn-ghost btn-tiny", "查看处理记录");
+        history.type = "button";
+        history.addEventListener("click", function () {
+          openFeedbackHistory(record.targetType, record.id);
+        });
+        actions.appendChild(history);
+        controls.appendChild(actions);
+        card.appendChild(controls);
+        body.appendChild(card);
+      });
+    }
+
+    window.MythosAPI.getAdminFeedback("all").then(renderQueue).catch(function (error) {
+      clear(body);
+      body.appendChild(backToAdminButton());
+      body.appendChild(el("p", "auth-error", error.message || String(error)));
+      var retry = el("button", "btn-ghost btn-tiny", "重试");
+      retry.type = "button";
+      retry.addEventListener("click", openAdminFeedbackQueue);
+      body.appendChild(retry);
+    });
+  }
+
+  function openFeedbackHistory(targetType, targetId) {
+    var body = el("div", "modal-body feedback-history");
+    body.appendChild(backToAdminButton());
+    body.appendChild(el("p", "modal-meta", "正在读取处理记录…"));
+    openModal("处理记录", body);
+    window.MythosAPI.getFeedbackHistory(targetType, targetId).then(function (data) {
+      clear(body);
+      body.appendChild(backToAdminButton());
+      var actions = Array.isArray(data && data.actions) ? data.actions : [];
+      if (!actions.length) {
+        body.appendChild(el("p", "reading-shelf-empty", "尚无管理员处理记录。"));
+        return;
+      }
+      actions.forEach(function (action) {
+        var row = el("article", "feedback-status-item");
+        row.appendChild(el("strong", null, feedbackStatusLabel(action.status)));
+        row.appendChild(el("span", null, action.adminName || (action.adminQq ? "管理员 QQ " + action.adminQq : "管理员")));
+        row.appendChild(el("p", "feedback-description", action.adminNote || "未填写内部备注。"));
+        row.appendChild(el("small", null, formatTime(action.createdAt)));
+        body.appendChild(row);
+      });
+    }).catch(function (error) {
+      clear(body);
+      body.appendChild(backToAdminButton());
+      body.appendChild(el("p", "auth-error", error.message || String(error)));
+    });
   }
 
   function openAdminModal() {
@@ -4234,6 +5050,20 @@
     contentRow.appendChild(editContent);
     contentBlock.appendChild(contentRow);
     body.appendChild(contentBlock);
+
+    var feedbackBlock = el("div", "admin-dir-entry");
+    var feedbackHead = el("div", "admin-dir-entry-head");
+    feedbackHead.appendChild(el("strong", null, "纠错与讨论管理"));
+    feedbackHead.appendChild(el("span", "admin-dir-count", "反馈 / 举报"));
+    feedbackBlock.appendChild(feedbackHead);
+    feedbackBlock.appendChild(el("p", "modal-meta", "查看作品问题反馈和评论举报，更新处理状态并回看管理员处理记录。"));
+    var feedbackRow = el("div", "admin-row");
+    var feedbackQueueButton = el("button", "btn-ghost", "打开反馈处理队列");
+    feedbackQueueButton.type = "button";
+    feedbackQueueButton.addEventListener("click", openAdminFeedbackQueue);
+    feedbackRow.appendChild(feedbackQueueButton);
+    feedbackBlock.appendChild(feedbackRow);
+    body.appendChild(feedbackBlock);
 
     openModal("管理面板", body);
   }
@@ -6323,11 +7153,224 @@
     return panel;
   }
 
+  function openCommentReport(comment, workIdValue) {
+    if (comment.deleted) return;
+    if (!canInteract()) {
+      showAuthGate();
+      return;
+    }
+    if (!USE_CLOUD) {
+      showToast("本地演示版暂不支持提交举报。");
+      return;
+    }
+    if (comment.qq && currentUser() && comment.qq === currentUser().qq) {
+      showToast("不能举报自己的评论。");
+      return;
+    }
+    var body = el("div", "modal-body report-form");
+    body.appendChild(el("p", "modal-meta", "举报内容仅供管理员处理，不会公开举报者身份。"));
+    var reasonLabel = el("label", "field-label", "举报原因");
+    var reason = el("select", "auth-input");
+    [
+      ["spam", "垃圾或广告"],
+      ["harassment", "骚扰或攻击"],
+      ["privacy", "泄露个人信息"],
+      ["other", "其他问题"],
+    ].forEach(function (entry) {
+      var option = document.createElement("option");
+      option.value = entry[0];
+      option.textContent = entry[1];
+      reason.appendChild(option);
+    });
+    reasonLabel.appendChild(reason);
+    body.appendChild(reasonLabel);
+    var descriptionLabel = el("label", "field-label", "补充说明（可选）");
+    var description = el("textarea", "auth-input");
+    description.maxLength = 500;
+    description.rows = 3;
+    descriptionLabel.appendChild(description);
+    body.appendChild(descriptionLabel);
+    var status = el("p", "comment-compose-status");
+    status.setAttribute("aria-live", "polite");
+    body.appendChild(status);
+    var actions = el("div", "reading-shelf-actions");
+    var submit = el("button", "btn", "提交举报");
+    submit.type = "button";
+    var requestId = newId();
+    var submittedSignature = "";
+    submit.addEventListener("click", function () {
+      if (submit.disabled || !canInteract()) return;
+      var requestPayload = {
+        commentId: comment.id,
+        reason: reason.value,
+        description: description.value.trim(),
+      };
+      var signature = JSON.stringify(requestPayload);
+      if (submittedSignature && submittedSignature !== signature) requestId = newId();
+      submittedSignature = signature;
+      submit.disabled = true;
+      status.textContent = "正在提交…";
+      window.MythosAPI.call("submitCommentReport", Object.assign({ requestId: requestId }, requestPayload)).then(function () {
+        status.textContent = "举报已收到，管理员会在后台核查。";
+        submit.hidden = true;
+      }).catch(function (error) {
+        status.textContent = error.message || String(error);
+        submit.disabled = false;
+      });
+    });
+    actions.appendChild(submit);
+    var cancel = el("button", "btn-ghost btn-tiny", "取消");
+    cancel.type = "button";
+    cancel.addEventListener("click", closeModal);
+    actions.appendChild(cancel);
+    body.appendChild(actions);
+    openModal("举报评论", body);
+  }
+
+  function selectedTextWithin(node) {
+    if (!node) return "";
+    var selection = window.getSelection && window.getSelection();
+    if (!selection || !selection.toString().trim() || !selection.anchorNode || !selection.focusNode) return "";
+    if (!node.contains(selection.anchorNode) || !node.contains(selection.focusNode)) return "";
+    return selection.toString().replace(/\s+/g, " ").trim().slice(0, 500);
+  }
+
+  function openWorkFeedback(edition, work) {
+    if (!canInteract()) {
+      if (!canInteract()) showAuthGate();
+      return;
+    }
+    if (!USE_CLOUD) {
+      showToast("本地演示版暂不支持提交问题反馈。");
+      return;
+    }
+    var body = el("div", "modal-body report-form");
+    var workIdValue = workId(edition.slug, work.slug);
+    body.appendChild(el("p", "modal-meta", "反馈会发送给管理员处理，不会直接更改在线正文。作品：" + work.title));
+    var categoryLabel = el("label", "field-label", "问题类型");
+    var category = el("select", "auth-input");
+    [["content", "正文内容或排版"], ["attachment", "附件问题"], ["other", "其他问题"]].forEach(function (entry) {
+      var option = document.createElement("option");
+      option.value = entry[0];
+      option.textContent = entry[1];
+      category.appendChild(option);
+    });
+    categoryLabel.appendChild(category);
+    body.appendChild(categoryLabel);
+    var selected = selectedTextWithin(refs.content.querySelector(".work-body"));
+    if (selected) {
+      body.appendChild(el("p", "feedback-selected-text", "选中文本：" + selected));
+    }
+    var descriptionLabel = el("label", "field-label", "问题说明");
+    var description = el("textarea", "auth-input");
+    description.rows = 5;
+    description.maxLength = 2000;
+    description.placeholder = "请简要说明错误位置和应如何修正。";
+    descriptionLabel.appendChild(description);
+    body.appendChild(descriptionLabel);
+    var status = el("p", "comment-compose-status");
+    status.setAttribute("aria-live", "polite");
+    body.appendChild(status);
+    var actions = el("div", "reading-shelf-actions");
+    var submit = el("button", "btn", "提交问题反馈");
+    submit.type = "button";
+    var requestId = newId();
+    var submittedSignature = "";
+    submit.addEventListener("click", function () {
+      if (submit.disabled || !canInteract()) return;
+      if (description.value.trim().length < 3) {
+        status.textContent = "请补充至少 3 个字的问题说明。";
+        description.focus();
+        return;
+      }
+      var requestPayload = {
+        workId: workIdValue,
+        category: category.value,
+        description: description.value.trim(),
+        selectedText: selected,
+        sourcePath: location.pathname + location.search + location.hash,
+      };
+      var signature = JSON.stringify(requestPayload);
+      if (submittedSignature && submittedSignature !== signature) requestId = newId();
+      submittedSignature = signature;
+      submit.disabled = true;
+      status.textContent = "正在提交…";
+      window.MythosAPI.call("submitWorkFeedback", Object.assign({ requestId: requestId }, requestPayload)).then(function () {
+        status.textContent = "已收到反馈。可在「我的阅读 → 我的问题反馈」查看处理状态。";
+        submit.hidden = true;
+      }).catch(function (error) {
+        status.textContent = error.message || String(error);
+        submit.disabled = false;
+      });
+    });
+    actions.appendChild(submit);
+    var cancel = el("button", "btn-ghost btn-tiny", "取消");
+    cancel.type = "button";
+    cancel.addEventListener("click", closeModal);
+    actions.appendChild(cancel);
+    body.appendChild(actions);
+    openModal("反馈作品问题", body);
+  }
+
+  function openMyFeedbackStatus() {
+    if (!canInteract() || !USE_CLOUD) return;
+    var body = el("div", "modal-body feedback-status-list");
+    body.appendChild(el("p", "modal-meta", "正在读取你提交的问题反馈…"));
+    openModal("我的问题反馈", body);
+    window.MythosAPI.call("getMyWorkFeedback").then(function (data) {
+      clear(body);
+      var records = Array.isArray(data && data.feedback) ? data.feedback : [];
+      if (!records.length) {
+        body.appendChild(el("p", "reading-shelf-empty", "你还没有提交作品问题反馈。"));
+        return;
+      }
+      records.forEach(function (record) {
+        var row = el("article", "feedback-status-item");
+        var item = readingShelfWork(record.workId);
+        row.appendChild(el("strong", null, item ? item.work.title : record.workId));
+        row.appendChild(el("span", null,
+          ({ content: "正文或排版", attachment: "附件", other: "其他" })[record.category] || "作品反馈"));
+        row.appendChild(el("span", "feedback-status-label", feedbackStatusLabel(record.status)));
+        row.appendChild(el("small", null, formatTime(record.updatedAt || record.createdAt)));
+        body.appendChild(row);
+      });
+    }).catch(function (error) {
+      clear(body);
+      body.appendChild(el("p", "auth-error", error.message || String(error)));
+      var retry = el("button", "btn-ghost btn-tiny", "重试");
+      retry.type = "button";
+      retry.addEventListener("click", openMyFeedbackStatus);
+      body.appendChild(retry);
+    });
+  }
+
+  function feedbackStatusLabel(status) {
+    return status === "resolved" ? "已解决" : status === "no_action" ? "无需处理" : "待处理";
+  }
+
+  function openSiteInformation() {
+    var body = el("div", "modal-body site-information");
+    [
+      ["本站说明", "幻梦境档案馆用于公开阅读、赛事评议与作品讨论。阅读公开档案无需账号；名单内调查员登录后可参与当前开放的评分、评论和收藏。"],
+      ["账号与资料", "QQ 号用于名单识别、账号登录与账号找回；注册或找回流程中填写的邮箱用于接收验证码。请为本站单独设置密码，不要使用 QQ 密码。"],
+      ["阅读记录", "未登录时，阅读进度、已读和稍后读只保存在当前设备的浏览器。登录后可以选择把本机记录合并到账号，并在多个设备间同步。收藏与阅读状态分别保存；清除阅读记录不会删除收藏。"],
+      ["评论规则", "讨论作品本身，尊重其他读者；不要发布骚扰、攻击内容或他人的个人信息。评论可选择匿名显示；管理员仍可按管理职责处理违规内容。举报内容仅管理员可见，不会公开举报者身份。"],
+      ["更正与联系", "作品问题可通过作品页的「反馈问题」提交。需要更正账号资料、处理账号删除或联系主办方时，请使用本届活动公告中列出的联系渠道。反馈不会直接覆盖在线正文。"],
+    ].forEach(function (entry) {
+      var section = el("section", "site-information-section");
+      section.appendChild(el("h3", null, entry[0]));
+      section.appendChild(el("p", null, entry[1]));
+      body.appendChild(section);
+    });
+    openModal("本站说明与数据使用", body);
+  }
+
   function renderCommentItem(comment, id, panel, inJudgeBox, isReply) {
     var li = el(
       inJudgeBox ? "div" : isReply ? "article" : "li",
       inJudgeBox ? "judge-item" : isReply ? "comment-reply" : "comment-item",
     );
+    li.dataset.commentId = String(comment.id || "");
     var head = el("div", "comment-head");
     var author = comment.qq ? store.users[comment.qq] : null;
     var name = comment.anonymous
@@ -6447,6 +7490,14 @@
         panel.parentNode.replaceChild(renderCommentPanel(id), panel);
       });
       head.appendChild(del);
+    } else if (!comment.deleted && canInteract()) {
+      var report = el("button", "comment-delete comment-report", "举报");
+      report.type = "button";
+      report.setAttribute("aria-label", "举报这条评论");
+      report.addEventListener("click", function () {
+        openCommentReport(comment, id);
+      });
+      head.appendChild(report);
     }
     li.appendChild(head);
     li.appendChild(bodyNode);
@@ -6497,7 +7548,12 @@
         thread.appendChild(repliesList);
         li.appendChild(thread);
       }
-      if (!comment.deleted && activeReplyComposer === threadKey && canInteract()) {
+      var savedReplyDraft = canInteract()
+        ? readCommentDraft(commentDraftStorageKey(currentUser(), id, comment.id))
+        : null;
+      var replyNeedsRecovery = savedReplyDraft &&
+        (savedReplyDraft.status === "pending" || savedReplyDraft.status === "published");
+      if (canInteract() && ((!comment.deleted && activeReplyComposer === threadKey) || replyNeedsRecovery)) {
         li.appendChild(renderReplyForm(id, comment, panel));
       }
     }
@@ -6505,198 +7561,288 @@
   }
 
   function renderReplyForm(id, rootComment, panel) {
-    var form = el("form", "comment-form comment-reply-form");
-    var rootAuthor = rootComment.anonymous
-      ? "匿名"
-      : rootComment.name || "用户";
-    form.appendChild(el("p", "comment-replying-to", "回复主评论 · " + rootAuthor));
-    var textarea = el("textarea", "comment-input");
-    textarea.placeholder = "回复这条主评论…";
-    textarea.maxLength = BODY_MAX;
-    form.appendChild(textarea);
-    fitCommentTextarea(textarea);
-
-    var tools = el("div", "comment-tools");
-    var anonWrap = el("label", "checkbox");
-    var anon = document.createElement("input");
-    anon.type = "checkbox";
-    anonWrap.appendChild(anon);
-    anonWrap.appendChild(el("span", null, "匿名"));
-    tools.appendChild(anonWrap);
-    var counter = el("span", "counter", "0/" + BODY_MAX);
-    tools.appendChild(counter);
-    var cancel = el("button", "btn-ghost btn-tiny", "取消");
-    cancel.type = "button";
-    cancel.addEventListener("click", function () {
-      activeReplyComposer = "";
-      panel.parentNode.replaceChild(renderCommentPanel(id), panel);
-    });
-    tools.appendChild(cancel);
-    var submit = el("button", "btn btn-tiny", "回复");
-    submit.type = "submit";
-    submit.disabled = true;
-    tools.appendChild(submit);
-    textarea.addEventListener("input", function () {
-      counter.textContent = textarea.value.length + "/" + BODY_MAX;
-      submit.disabled = !textarea.value.trim();
-    });
-
-    form.addEventListener("submit", function (event) {
-      event.preventDefault();
-      if (!canInteract()) return;
-      var body = textarea.value.trim();
-      if (!body) return;
-      var user = currentUser();
-      if (USE_CLOUD) {
-        var commentSubmitted = false;
-        submit.disabled = true;
-        window.MythosAPI.call("addComment", {
-          workId: id,
-          replyToId: rootComment.id,
-          body: body,
-          anonymous: !!anon.checked,
-        })
-          .then(function () {
-            commentSubmitted = true;
-            activeReplyComposer = "";
-            notifyWitch("comment-success");
-            return loadCloudWorkBundle(id, true);
-          })
-          .then(function () {
-            panel.parentNode.replaceChild(renderCommentPanel(id), panel);
-          })
-          .catch(function (e) {
-            alert(e.message || String(e));
-            submit.disabled = false;
-            if (!commentSubmitted) notifyWitch("comment-failure");
-          });
-        return;
-      }
-      var list = commentsOf(id).slice();
-      list.push({
-        id: newId(),
-        workId: id,
-        rootId: rootComment.id,
-        qq: user.qq,
-        name: displayName(user),
-        anonymous: !!anon.checked,
-        judge: false,
-        body: body.slice(0, BODY_MAX),
-        t: new Date().toISOString(),
-      });
-      store.comments[id] = list;
-      activeReplyComposer = "";
-      persist();
-      panel.parentNode.replaceChild(renderCommentPanel(id), panel);
-      notifyWitch("comment-success");
-    });
-
-    form.appendChild(tools);
-    return form;
+    return renderCommentComposer(id, panel, rootComment, false);
   }
 
   function renderCommentForm(id, panel) {
-    var form = el("form", "comment-form");
     var asJudge = isAdmin() && isJudgePhase();
+    return renderCommentComposer(id, panel, null, asJudge);
+  }
+
+  function renderCommentComposer(id, panel, rootComment, asJudge) {
+    var form = el("form", "comment-form" + (rootComment ? " comment-reply-form" : ""));
+    var user = currentUser();
+    var targetId = rootComment ? rootComment.id : "root";
+    var draftKey = commentDraftStorageKey(user, id, targetId);
+    var draft = readCommentDraft(draftKey) || { status: "editing", body: "", anonymous: false };
+    if (draft.status !== "pending" && draft.status !== "published") {
+      draft.status = "editing";
+      draft.body = String(draft.body || "");
+      draft.anonymous = !!draft.anonymous;
+    }
+    if (draft.status === "pending" && (!draft.requestId || !draft.body)) {
+      draft.status = "editing";
+      draft.requestId = "";
+    }
+
+    if (rootComment) {
+      var rootAuthor = rootComment.anonymous ? "匿名" : rootComment.name || "用户";
+      form.appendChild(el("p", "comment-replying-to", "回复主评论 · " + rootAuthor));
+    }
+    if (asJudge) {
+      form.appendChild(el("p", "rate-hint", "当前为投票统计期，管理员评论将记为评委评价并置顶。其他阶段的管理评论为普通评论。"));
+    }
+
     var textarea = el("textarea", "comment-input");
-    textarea.placeholder = asJudge
-      ? "投票统计期：以评委身份发表（将置顶显示）…"
-      : "读完这篇，说点什么…";
+    textarea.placeholder = rootComment
+      ? "回复这条主评论…"
+      : asJudge
+        ? "投票统计期：以评委身份发表（将置顶显示）…"
+        : "读完这篇，说点什么…";
     textarea.maxLength = BODY_MAX;
+    textarea.value = draft.status === "published" ? "" : String(draft.body || "");
     form.appendChild(textarea);
     fitCommentTextarea(textarea);
-
-    if (asJudge) {
-      form.appendChild(
-        el(
-          "p",
-          "rate-hint",
-          "当前为投票统计期，管理员评论将记为评委评价并置顶。其他阶段的管理评论为普通评论。",
-        ),
-      );
-    }
 
     var tools = el("div", "comment-tools");
     var anonWrap = el("label", "checkbox");
     var anon = document.createElement("input");
     anon.type = "checkbox";
-    anon.checked = false;
+    anon.checked = !!draft.anonymous;
     anonWrap.appendChild(anon);
     anonWrap.appendChild(el("span", null, "匿名"));
     tools.appendChild(anonWrap);
-
-    var nickHint = el(
-      "span",
-      "rate-hint",
-      "将显示为：" + displayName(currentUser()) + (asJudge ? "（评委）" : ""),
-    );
-    tools.appendChild(nickHint);
-    anon.addEventListener("change", function () {
-      nickHint.textContent = anon.checked
-        ? "将显示为：匿名"
-        : "将显示为：" +
-          displayName(currentUser()) +
-          (asJudge ? "（评委）" : "");
-    });
+    if (!rootComment) {
+      var nickHint = el(
+        "span",
+        "rate-hint",
+        anon.checked ? "将显示为：匿名" : "将显示为：" + displayName(user) + (asJudge ? "（评委）" : ""),
+      );
+      tools.appendChild(nickHint);
+      anon.addEventListener("change", function () {
+        nickHint.textContent = anon.checked
+          ? "将显示为：匿名"
+          : "将显示为：" + displayName(user) + (asJudge ? "（评委）" : "");
+      });
+    }
 
     var counter = el("span", "counter", "0/" + BODY_MAX);
     tools.appendChild(counter);
-    var submit = el("button", "btn", asJudge ? "发表评委评价" : "发表");
+    var cancel = null;
+    if (rootComment) {
+      cancel = el("button", "btn-ghost btn-tiny", "取消");
+      cancel.type = "button";
+      cancel.addEventListener("click", function () {
+        activeReplyComposer = "";
+        if (panel.isConnected && panel.parentNode) {
+          panel.parentNode.replaceChild(renderCommentPanel(id), panel);
+        }
+      });
+      tools.appendChild(cancel);
+    }
+    var submit = el(
+      "button",
+      "btn" + (rootComment ? " btn-tiny" : ""),
+      rootComment ? "回复" : asJudge ? "发表评委评价" : "发表",
+    );
     submit.type = "submit";
-    submit.disabled = true;
     tools.appendChild(submit);
+    var refreshCommentsButton = el("button", "btn-ghost btn-tiny", "刷新评论");
+    refreshCommentsButton.type = "button";
+    refreshCommentsButton.hidden = true;
+    tools.appendChild(refreshCommentsButton);
 
-    textarea.addEventListener("input", function () {
+    var status = el("p", "comment-compose-status");
+    status.setAttribute("aria-live", "polite");
+    form.appendChild(status);
+
+    var isSending = false;
+    var isRefreshing = false;
+    function setStatus(message, isError) {
+      status.textContent = message || "";
+      status.classList.toggle("is-error", !!isError);
+    }
+    function updateCounter() {
       counter.textContent = textarea.value.length + "/" + BODY_MAX;
-      submit.disabled = !textarea.value.trim();
-    });
-
-    form.addEventListener("submit", function (event) {
-      event.preventDefault();
-      if (!canInteract()) return;
-      var body = textarea.value.trim();
+    }
+    function refreshControls() {
+      var pending = draft.status === "pending";
+      var published = draft.status === "published";
+      textarea.disabled = isSending || isRefreshing || pending || published;
+      anon.disabled = isSending || isRefreshing || pending || published;
+      if (cancel) cancel.disabled = isSending || isRefreshing || pending || published;
+      submit.hidden = published;
+      submit.disabled = isSending || isRefreshing || (draft.status === "editing" && !textarea.value.trim());
+      submit.textContent = isSending
+        ? "发送中…"
+        : pending
+          ? (rootComment ? "重试同一回复" : "重试同一提交")
+          : rootComment
+            ? "回复"
+            : asJudge
+              ? "发表评委评价"
+              : "发表";
+      refreshCommentsButton.hidden = !published;
+      refreshCommentsButton.disabled = isRefreshing || !USE_CLOUD;
+      refreshCommentsButton.textContent = isRefreshing ? "刷新中…" : "刷新评论";
+    }
+    function saveEditingDraft(message) {
+      if (isSending || draft.status === "pending" || draft.status === "published") return;
+      draft = {
+        status: "editing",
+        body: textarea.value,
+        anonymous: !!anon.checked,
+        updatedAt: new Date().toISOString(),
+      };
+      if (!draft.body.trim()) {
+        removeCommentDraft(draftKey);
+        setStatus("");
+      } else if (writeCommentDraft(draftKey, draft)) {
+        setStatus(message || "草稿已保存在此设备。", false);
+      } else {
+        setStatus("本机草稿保存失败；当前输入仍保留在页面中。", true);
+      }
+      refreshControls();
+    }
+    function refreshCommentList() {
+      if (!USE_CLOUD) {
+        setStatus("评论已发表；连接在线档案馆后可刷新评论列表。", true);
+        refreshControls();
+        return;
+      }
+      isRefreshing = true;
+      setStatus("评论已发表，正在刷新列表…", false);
+      refreshControls();
+      loadCloudWorkBundle(id, true)
+        .then(function () {
+          removeCommentDraft(draftKey);
+          if (rootComment && activeReplyComposer === id + "::" + rootComment.id) activeReplyComposer = "";
+          if (panel.isConnected && panel.parentNode) {
+            panel.parentNode.replaceChild(renderCommentPanel(id), panel);
+          }
+        })
+        .catch(function () {
+          isRefreshing = false;
+          setStatus("评论已发表，但列表刷新失败。可点“刷新评论”重试；不会再次发送正文。", true);
+          refreshControls();
+        });
+    }
+    function finishPublished(result) {
+      isSending = false;
+      draft = {
+        status: "published",
+        requestId: draft.requestId,
+        commentId: result && result.comment ? result.comment.id : "",
+        anonymous: false,
+        body: "",
+        updatedAt: new Date().toISOString(),
+      };
+      writeCommentDraft(draftKey, draft);
+      textarea.value = "";
+      anon.checked = false;
+      updateCounter();
+      if (rootComment) activeReplyComposer = id + "::" + rootComment.id;
+      notifyWitch("comment-success");
+      refreshCommentList();
+    }
+    function sendComment() {
+      if (!canInteract() || isSending || draft.status === "published") return;
+      var body = draft.status === "pending" ? String(draft.body || "").trim() : textarea.value.trim();
       if (!body) return;
-      var user = currentUser();
+      var anonymous = draft.status === "pending" ? !!draft.anonymous : !!anon.checked;
+      var requestId = draft.status === "pending" && draft.requestId ? draft.requestId : newId();
+      draft = {
+        status: "pending",
+        body: body,
+        anonymous: anonymous,
+        requestId: requestId,
+        updatedAt: new Date().toISOString(),
+      };
+      if (!writeCommentDraft(draftKey, draft)) {
+        draft.status = "editing";
+        setStatus("无法在本机保存提交编号，暂不能安全发送。请先释放本机存储空间后重试。", true);
+        refreshControls();
+        return;
+      }
+      isSending = true;
+      setStatus("正在发送评论…", false);
+      refreshControls();
+
       if (USE_CLOUD) {
-        var commentSubmitted = false;
-        submit.disabled = true;
         window.MythosAPI.call("addComment", {
           workId: id,
+          replyToId: rootComment ? rootComment.id : "",
           body: body,
-          anonymous: !!anon.checked,
+          anonymous: anonymous,
+          requestId: requestId,
         })
-          .then(function () {
-            commentSubmitted = true;
-            notifyWitch("comment-success");
-            return loadCloudWorkBundle(id, true);
+          .then(function (result) {
+            finishPublished(result);
           })
-          .then(function () {
-            panel.parentNode.replaceChild(renderCommentPanel(id), panel);
-          })
-          .catch(function (e) {
-            alert(e.message || String(e));
-            submit.disabled = false;
-            if (!commentSubmitted) notifyWitch("comment-failure");
+          .catch(function (error) {
+            isSending = false;
+            if (Number(error && error.status) >= 400 && Number(error.status) < 500) {
+              draft.status = "editing";
+              draft.requestId = "";
+              writeCommentDraft(draftKey, draft);
+              textarea.value = body;
+              anon.checked = anonymous;
+              setStatus("提交未成功：" + (error.message || String(error)) + " 可修改后再试。", true);
+            } else {
+              draft.status = "pending";
+              draft.body = body;
+              draft.anonymous = anonymous;
+              draft.requestId = requestId;
+              writeCommentDraft(draftKey, draft);
+              setStatus("提交结果暂时无法确认。可重试同一请求；系统会返回原评论，不会重复发表。", true);
+            }
+            refreshControls();
+            notifyWitch("comment-failure");
           });
         return;
       }
-      var list = commentsOf(id).slice();
-      var judge = isAdmin() && isJudgePhase() && !anon.checked;
-      list.push({
+
+      var localComment = {
         id: newId(),
+        workId: id,
+        rootId: rootComment ? rootComment.id : null,
         qq: user.qq,
         name: displayName(user),
-        anonymous: !!anon.checked,
-        judge: judge,
+        anonymous: anonymous,
+        judge: !rootComment && isAdmin() && isJudgePhase() && !anonymous,
         body: body.slice(0, BODY_MAX),
         t: new Date().toISOString(),
-      });
-      store.comments[id] = list;
+      };
+      store.comments[id] = commentsOf(id).concat([localComment]);
       persist();
-      panel.parentNode.replaceChild(renderCommentPanel(id), panel);
+      removeCommentDraft(draftKey);
+      if (rootComment) activeReplyComposer = "";
       notifyWitch("comment-success");
-    });
+      if (panel.isConnected && panel.parentNode) {
+        panel.parentNode.replaceChild(renderCommentPanel(id), panel);
+      }
+    }
 
+    textarea.addEventListener("input", function () {
+      updateCounter();
+      saveEditingDraft();
+    });
+    anon.addEventListener("change", function () { saveEditingDraft(); });
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      sendComment();
+    });
+    refreshCommentsButton.addEventListener("click", refreshCommentList);
+
+    updateCounter();
+    if (draft.status === "pending") {
+      setStatus("上次提交结果待确认。重试会使用同一请求编号，不会重复发表。", true);
+    } else if (draft.status === "published") {
+      setStatus("评论已发表，评论列表待刷新。", false);
+    } else if (draft.body) {
+      setStatus("已恢复此账号在本设备保存的评论草稿。", false);
+    }
+    refreshControls();
     form.appendChild(tools);
     return form;
   }
@@ -7486,6 +8632,8 @@
           ? "catalogue"
           : view === "results"
             ? "results"
+              : view === "reading"
+                ? "reading"
             : "";
     refs.siteNav.querySelectorAll("[data-nav]").forEach(function (button) {
       button.classList.toggle("is-active", button.dataset.nav === active);
@@ -7493,12 +8641,205 @@
   }
 
   function setLayoutMode(view) {
-    var homeLike = view === "home" || view === "edition";
+    var homeLike = view === "home" || view === "edition" || view === "reading";
     refs.layout.classList.toggle("home-active", homeLike);
     refs.layout.classList.toggle("reader-active", view === "reader" || view === "results");
     document.body.dataset.view = view;
     setSiteNavActive(view);
     if (homeLike) applySidebarCollapsed(true);
+  }
+
+  var commentNotificationsByQq = Object.create(null);
+  var commentNotificationsInflight = Object.create(null);
+  var pendingNotificationTarget = null;
+
+  function updateNotificationBadge() {
+    var user = currentUser();
+    var notifications = user ? commentNotificationsByQq[user.qq] || [] : [];
+    var unread = notifications.filter(function (item) { return !item.readAt; }).length;
+    if (refs.notificationCount) {
+      refs.notificationCount.textContent = unread > 99 ? "99+" : String(unread);
+      refs.notificationCount.hidden = unread < 1;
+    }
+    if (refs.siteNav) {
+      var navButton = refs.siteNav.querySelector('[data-nav="notifications"]');
+      var count = navButton && navButton.querySelector(".notification-count");
+      if (count) {
+        count.textContent = unread > 99 ? "99+" : String(unread);
+        count.hidden = unread < 1;
+      }
+    }
+    if (refs.topNotifications) {
+      refs.topNotifications.setAttribute("aria-label", unread ? "站内通知，未读 " + unread + " 条" : "站内通知");
+    }
+  }
+
+  function loadCommentNotifications(force) {
+    var user = currentUser();
+    if (!USE_CLOUD || !user) {
+      updateNotificationBadge();
+      return Promise.resolve([]);
+    }
+    if (!force && commentNotificationsInflight[user.qq]) return commentNotificationsInflight[user.qq];
+    commentNotificationsInflight[user.qq] = window.MythosAPI.call("getCommentNotifications")
+      .then(function (data) {
+        if (currentUser() && currentUser().qq === user.qq) {
+          commentNotificationsByQq[user.qq] = Array.isArray(data && data.notifications) ? data.notifications : [];
+          updateNotificationBadge();
+        }
+        return commentNotificationsByQq[user.qq] || [];
+      })
+      .then(function (items) {
+        delete commentNotificationsInflight[user.qq];
+        return items;
+      }, function (error) {
+        delete commentNotificationsInflight[user.qq];
+        throw error;
+      });
+    return commentNotificationsInflight[user.qq];
+  }
+
+  function setLocalNotificationRead(id) {
+    var user = currentUser();
+    if (!user) return;
+    var items = commentNotificationsByQq[user.qq] || [];
+    items.forEach(function (item) {
+      if (item.id === id && !item.readAt) item.readAt = new Date().toISOString();
+    });
+    updateNotificationBadge();
+  }
+
+  function openCommentNotifications() {
+    if (!canInteract() || !USE_CLOUD) {
+      if (!canInteract()) showAuthGate();
+      return;
+    }
+    var body = el("div", "modal-body notification-modal");
+    var status = el("p", "modal-meta", "正在读取站内通知…");
+    body.appendChild(status);
+    function render(items, error) {
+      clear(body);
+      var actions = el("div", "notification-modal-actions");
+      var refresh = el("button", "btn-ghost btn-tiny", "刷新");
+      refresh.type = "button";
+      refresh.addEventListener("click", function () {
+        renderNotificationLoading();
+        loadCommentNotifications(true).then(render).catch(function (err) { render([], err); });
+      });
+      actions.appendChild(refresh);
+      var markAll = el("button", "btn-ghost btn-tiny", "全部标为已读");
+      markAll.type = "button";
+      markAll.disabled = !items.some(function (item) { return !item.readAt; });
+      markAll.addEventListener("click", function () {
+        markAll.disabled = true;
+        window.MythosAPI.call("markAllCommentNotificationsRead")
+          .then(function () {
+            var user = currentUser();
+            if (!user) return;
+            (commentNotificationsByQq[user.qq] || []).forEach(function (item) {
+              item.readAt = item.readAt || new Date().toISOString();
+            });
+            updateNotificationBadge();
+            render(commentNotificationsByQq[user.qq] || []);
+          }).catch(function (err) {
+            markAll.disabled = false;
+            showToast("标记通知失败：" + (err.message || String(err)));
+          });
+      });
+      actions.appendChild(markAll);
+      body.appendChild(actions);
+      if (error) {
+        body.appendChild(el("p", "auth-error", "通知暂时无法读取：" + (error.message || String(error))));
+        return;
+      }
+      if (!items.length) {
+        body.appendChild(el("p", "reading-shelf-empty", "目前没有需要回访的回复。"));
+        return;
+      }
+      var list = el("div", "notification-list");
+      items.forEach(function (item) {
+        var card = el("article", "notification-item" + (item.readAt ? " is-read" : " is-unread"));
+        var open = el("button", "notification-open");
+        open.type = "button";
+        open.appendChild(el("strong", null, "有人回复了你的评论"));
+        open.appendChild(el("span", null, item.preview || "打开作品查看回复。"));
+        open.appendChild(el("small", null, formatTime(item.createdAt)));
+        open.addEventListener("click", function () {
+          window.MythosAPI.call("markCommentNotificationRead", { id: item.id })
+            .then(function () {
+              setLocalNotificationRead(item.id);
+              closeModal();
+              jumpToCommentNotification(item);
+            }).catch(function (err) {
+              showToast("标记已读失败：" + (err.message || String(err)));
+            });
+        });
+        card.appendChild(open);
+        var dismiss = el("button", "notification-dismiss", "收起提醒");
+        dismiss.type = "button";
+        dismiss.addEventListener("click", function () {
+          dismiss.disabled = true;
+          window.MythosAPI.call("dismissCommentNotification", { id: item.id })
+            .then(function () {
+              var user = currentUser();
+              if (!user) return;
+              commentNotificationsByQq[user.qq] = (commentNotificationsByQq[user.qq] || []).filter(function (entry) {
+                return entry.id !== item.id;
+              });
+              updateNotificationBadge();
+              render(commentNotificationsByQq[user.qq]);
+            }).catch(function (err) {
+              dismiss.disabled = false;
+              showToast("收起通知失败：" + (err.message || String(err)));
+            });
+        });
+        card.appendChild(dismiss);
+        list.appendChild(card);
+      });
+      body.appendChild(list);
+    }
+    function renderNotificationLoading() {
+      clear(body);
+      body.appendChild(el("p", "modal-meta", "正在读取站内通知…"));
+    }
+    openModal("站内通知", body);
+    loadCommentNotifications(true).then(render).catch(function (error) { render([], error); });
+  }
+
+  function jumpToCommentNotification(item) {
+    var parts = String(item.workId || "").split("/");
+    if (parts.length < 2) {
+      showToast("无法定位到这篇作品。");
+      return;
+    }
+    loadCloudWorkBundle(item.workId).then(function () {
+      openReplyRemainders[item.workId + "::" + item.rootId] = true;
+      pendingNotificationTarget = item.commentId;
+      location.hash = "#/" + parts[0] + "/" + encodeURIComponent(parts.slice(1).join("/"));
+      window.setTimeout(function () { tryFocusPendingNotification(); }, 40);
+    }).catch(function (error) {
+      showToast("回复暂时无法读取：" + (error.message || String(error)));
+    });
+  }
+
+  function tryFocusPendingNotification() {
+    if (!pendingNotificationTarget || state.view !== "reader") return false;
+    var target = null;
+    Array.prototype.some.call(refs.content.querySelectorAll("[data-comment-id]"), function (node) {
+      if (node.dataset.commentId === pendingNotificationTarget) {
+        target = node;
+        return true;
+      }
+      return false;
+    });
+    if (!target) return false;
+    pendingNotificationTarget = null;
+    target.classList.add("is-notification-target");
+    target.tabIndex = -1;
+    target.focus({ preventScroll: true });
+    target.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "center" });
+    window.setTimeout(function () { target.classList.remove("is-notification-target"); }, 1200);
+    return true;
   }
 
   // 小女巫只消费当前站点状态，不维护第二套路由或作品数据副本。
@@ -8217,19 +9558,63 @@
 
   function parseGlobalSearchQuery(query) {
     var raw = String(query || "").trim();
-    var match = raw.match(/^(标题|作者|编号|届别|阶段)\s*[:：]\s*(.*)$/);
     var scopeMap = {
       标题: "title",
       作者: "author",
       编号: "number",
+      档号: "number",
       届别: "edition",
+      年份: "edition",
       阶段: "phase",
+      篇幅: "length",
+      题材: "topic",
+      title: "title",
+      author: "author",
+      number: "number",
+      edition: "edition",
+      year: "edition",
+      phase: "phase",
+      length: "length",
+      topic: "topic",
     };
-    if (!match) return { scope: "all", needle: raw.toLowerCase() };
+    var tokens = raw.match(/(?:[\p{L}]+|标题|作者|编号|档号|届别|年份|阶段|篇幅|题材)\s*[:：]\s*(?:"[^"]*"|'[^']*'|[^\s]+)|"[^"]*"|'[^']*'|[^\s]+/giu) || [];
+    var terms = tokens.map(function (token) {
+      var match = token.match(/^([^:：]+)\s*[:：]\s*(.*)$/);
+      var scopeName = match ? String(match[1] || "").trim() : "";
+      var value = match ? String(match[2] || "").trim() : token;
+      if ((value[0] === "\"" && value[value.length - 1] === "\"") ||
+          (value[0] === "'" && value[value.length - 1] === "'")) {
+        value = value.slice(1, -1);
+      }
+      return {
+        scope: scopeMap[scopeName] || "all",
+        label: scopeName || "关键词",
+        value: value.toLowerCase(),
+        raw: token,
+      };
+    }).filter(function (term) { return !!term.value; });
     return {
-      scope: scopeMap[match[1]] || "all",
-      needle: String(match[2] || "").trim().toLowerCase(),
+      scope: terms.length === 1 ? terms[0].scope : "all",
+      terms: terms,
+      filters: terms.filter(function (term) { return term.scope !== "all"; }),
+      needle: terms.map(function (term) { return term.value; }).join(" "),
     };
+  }
+
+  function searchWorkLengthLabel(work) {
+    var chars = Number(work && work.chars) || 0;
+    if (chars > 0 && chars < 2000) return "短篇 短";
+    if (chars >= 2000 && chars <= 4000) return "中篇 中";
+    if (chars > 4000) return "长篇 长";
+    return "篇幅未知";
+  }
+
+  function searchWorkTopics(edition, work) {
+    var id = workId(edition.slug, work.slug);
+    var topicMap = window.ARCHIVE_GUIDES && window.ARCHIVE_GUIDES.topicsByWork;
+    var topics = topicMap && topicMap[id];
+    if (!Array.isArray(topics)) topics = (work && (work.topics || work.tags)) || [];
+    return Array.isArray(topics) ? topics.join(" ").toLowerCase() : String(topics || "").toLowerCase();
   }
 
   function globalSearchFields(edition, work, phase) {
@@ -8242,12 +9627,16 @@
         .join(" ")
         .toLowerCase(),
       phase: String(phase || "").toLowerCase(),
+      length: searchWorkLengthLabel(work).toLowerCase(),
+      topic: searchWorkTopics(edition, work),
       all: [
         edition.year,
         edition.name,
         edition.shortName,
         edition.slug,
         phase,
+        searchWorkLengthLabel(work),
+        searchWorkTopics(edition, work),
       ]
         .concat(workSearchText(work))
         .join(" ")
@@ -8257,14 +9646,17 @@
 
   function globalSearchResults(query) {
     var parsed = parseGlobalSearchQuery(query);
-    if (!parsed.needle) return [];
+    if (!parsed.terms.length) return [];
     var results = [];
     editions.forEach(function (edition) {
       var phase = isArchivedEdition(edition) ? "已封存" : phaseLabel(phaseOf(edition.slug));
       edition.works.forEach(function (work) {
         var fields = globalSearchFields(edition, work, phase);
-        var haystack = fields[parsed.scope] || fields.all;
-        if (haystack.indexOf(parsed.needle) !== -1) {
+        var matches = parsed.terms.every(function (term) {
+          var haystack = fields[term.scope] || fields.all;
+          return haystack.indexOf(term.value) !== -1;
+        });
+        if (matches) {
           results.push({ edition: edition, work: work, phase: phase });
         }
       });
@@ -8274,14 +9666,14 @@
 
   function globalSearchLooseResults(query) {
     var parsed = parseGlobalSearchQuery(query);
-    var tokens = parsed.needle.split(/[\s,，、]+/).filter(Boolean);
+    var tokens = parsed.terms.map(function (term) { return term.value; }).filter(Boolean);
     if (tokens.length < 2) return [];
     var matches = [];
     editions.forEach(function (edition) {
       var phase = isArchivedEdition(edition) ? "已封存" : phaseLabel(phaseOf(edition.slug));
       edition.works.forEach(function (work) {
         var fields = globalSearchFields(edition, work, phase);
-        var haystack = fields[parsed.scope] || fields.all;
+        var haystack = fields.all;
         var score = tokens.reduce(function (total, token) {
           return total + (haystack.indexOf(token) !== -1 ? 1 : 0);
         }, 0);
@@ -8347,13 +9739,80 @@
     var suggestionsNode = el("div", "global-search-suggestions");
     suggestionsNode.setAttribute("aria-label", "搜索范围快捷项");
     panel.appendChild(suggestionsNode);
+    var activeFiltersNode = el("div", "global-search-active-filters");
+    activeFiltersNode.setAttribute("aria-label", "当前搜索条件");
+    panel.appendChild(activeFiltersNode);
     var discoveryNode = el("div", "global-search-discovery");
     panel.appendChild(discoveryNode);
     var resultsNode = el("div", "global-search-results");
     resultsNode.setAttribute("role", "list");
+    resultsNode.setAttribute("aria-label", "搜索结果");
     panel.appendChild(resultsNode);
     var emptySearchTimer = null;
     var emptySearchAnnounced = false;
+    var activeSearchResultIndex = -1;
+
+    function paintActiveFilters(parsed) {
+      clear(activeFiltersNode);
+      if (!input.value.trim()) return;
+      parsed.filters.forEach(function (term) {
+        var termIndex = parsed.terms.indexOf(term);
+        var remove = el("button", "global-search-filter-chip", term.label + "：" + term.value + " ×");
+        remove.type = "button";
+        remove.setAttribute("aria-label", "移除" + term.label + "条件" + term.value);
+        remove.addEventListener("click", function () {
+          input.value = parsed.terms.filter(function (_item, index) { return index !== termIndex; })
+            .map(function (item) { return item.raw; }).join(" ");
+          paint();
+          input.focus();
+        });
+        activeFiltersNode.appendChild(remove);
+      });
+      var share = el("button", "global-search-share", "复制分享链接");
+      share.type = "button";
+      share.addEventListener("click", function () {
+        var url = new URL(window.location.href);
+        url.searchParams.set("find", input.value.trim());
+        var text = url.href;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () {
+            showToast("搜索链接已复制。");
+          }).catch(function () {
+            window.prompt("复制这个搜索链接", text);
+          });
+        } else {
+          window.prompt("复制这个搜索链接", text);
+        }
+      });
+      activeFiltersNode.appendChild(share);
+    }
+
+    function appendSearchHighlights(node, value, terms) {
+      var text = String(value || "");
+      var lower = text.toLowerCase();
+      var ranges = [];
+      (terms || []).forEach(function (term) {
+        var needle = String(term.value || "").toLowerCase();
+        if (!needle) return;
+        var index = lower.indexOf(needle);
+        if (index !== -1) ranges.push([index, index + needle.length]);
+      });
+      ranges.sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; });
+      var merged = [];
+      ranges.forEach(function (range) {
+        var last = merged[merged.length - 1];
+        if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
+        else merged.push(range.slice());
+      });
+      var cursor = 0;
+      merged.forEach(function (range) {
+        if (range[0] > cursor) node.appendChild(document.createTextNode(text.slice(cursor, range[0])));
+        node.appendChild(el("mark", "global-search-match", text.slice(range[0], range[1])));
+        cursor = range[1];
+      });
+      if (cursor < text.length) node.appendChild(document.createTextNode(text.slice(cursor)));
+      if (!merged.length) node.appendChild(document.createTextNode(text));
+    }
 
     function paintDiscovery(rows, loading) {
       clear(discoveryNode);
@@ -8409,6 +9868,8 @@
         ["编号", "number"],
         ["届别", "edition"],
         ["阶段", "phase"],
+        ["篇幅", "length"],
+        ["题材", "topic"],
       ].forEach(function (item) {
         var button = el("button", "global-search-suggestion", item[0]);
         button.type = "button";
@@ -8454,11 +9915,13 @@
 
     function paint() {
       clear(resultsNode);
+      activeSearchResultIndex = -1;
       var parsed = parseGlobalSearchQuery(input.value);
       discoveryNode.hidden = !!parsed.needle;
       var results = globalSearchResults(input.value);
       var recoveryResults = results.length ? [] : globalSearchLooseResults(input.value);
       paintSearchScopes(parsed.scope, parsed.needle ? recoveryResults : []);
+      paintActiveFilters(parsed);
       if (!parsed.needle) {
         if (emptySearchTimer) window.clearTimeout(emptySearchTimer);
         emptySearchTimer = null;
@@ -8493,11 +9956,17 @@
         link.setAttribute("role", "listitem");
         link.appendChild(el("span", "global-search-no", String(result.work.no).padStart(3, "0")));
         var main = el("span", "global-search-main");
-        main.appendChild(el("strong", "global-search-title", result.work.title));
-        main.appendChild(
-          el("span", "global-search-meta", result.work.author + " · " + result.phase),
-        );
+        var title = el("strong", "global-search-title");
+        appendSearchHighlights(title, result.work.title, parsed.terms);
+        main.appendChild(title);
+        var meta = el("span", "global-search-meta");
+        appendSearchHighlights(meta, result.work.author, parsed.terms);
+        meta.appendChild(document.createTextNode(" · " + result.phase));
+        main.appendChild(meta);
         link.appendChild(main);
+        link.addEventListener("focus", function () {
+          activeSearchResultIndex = Array.prototype.indexOf.call(resultsNode.querySelectorAll("a.global-search-item"), link);
+        });
         link.addEventListener("click", function () {
           closeGlobalSearchPanel();
         });
@@ -8506,6 +9975,34 @@
     }
 
     input.addEventListener("input", paint);
+    input.addEventListener("keydown", function (event) {
+      var links = resultsNode.querySelectorAll("a.global-search-item");
+      if (!links.length) return;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        var next = event.key === "ArrowDown" ? 0 : links.length - 1;
+        activeSearchResultIndex = next;
+        links[next].focus();
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        links[activeSearchResultIndex >= 0 ? activeSearchResultIndex : 0].click();
+      }
+    });
+    resultsNode.addEventListener("keydown", function (event) {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      var links = resultsNode.querySelectorAll("a.global-search-item");
+      if (!links.length) return;
+      event.preventDefault();
+      var delta = event.key === "ArrowDown" ? 1 : -1;
+      var next = activeSearchResultIndex + delta;
+      if (next < 0) {
+        activeSearchResultIndex = -1;
+        input.focus();
+        return;
+      }
+      activeSearchResultIndex = next % links.length;
+      links[activeSearchResultIndex].focus();
+    });
     paint();
   }
 
@@ -8549,6 +10046,14 @@
             openGuideModal();
             return;
           }
+          if (nav === "reading") {
+            location.hash = "#/__reading";
+            return;
+          }
+          if (nav === "notifications") {
+            openCommentNotifications();
+            return;
+          }
           if (nav === "search") {
             openGlobalSearchPanel();
             return;
@@ -8587,6 +10092,18 @@
     if (refs.topResults) {
       refs.topResults.addEventListener("click", navigateToPublicResults);
     }
+    if (refs.topReading) {
+      refs.topReading.addEventListener("click", function () {
+        setTopMenuOpen(false);
+        location.hash = "#/__reading";
+      });
+    }
+    if (refs.topNotifications) {
+      refs.topNotifications.addEventListener("click", function () {
+        setTopMenuOpen(false);
+        openCommentNotifications();
+      });
+    }
     if (refs.siteAccountLink) {
       refs.siteAccountLink.addEventListener("click", function () {
         if (!isLoggedIn()) {
@@ -8605,6 +10122,10 @@
     var resultsEntry = refs.siteNav && refs.siteNav.querySelector('[data-nav="results"]');
     if (resultsEntry) resultsEntry.hidden = !publicEdition;
     if (refs.topResults) refs.topResults.hidden = !publicEdition;
+    if (refs.topNotifications) refs.topNotifications.hidden = !canInteract();
+    var notificationsEntry = refs.siteNav && refs.siteNav.querySelector('[data-nav="notifications"]');
+    if (notificationsEntry) notificationsEntry.hidden = !canInteract();
+    updateNotificationBadge();
     if (!refs.siteAccountLink) return;
     if (!isLoggedIn()) {
       refs.siteAccountLink.textContent = "调查员入口";
@@ -8658,6 +10179,94 @@
       row.appendChild(el("span", "catalogue-preview-leader"));
       row.appendChild(el("span", "catalogue-preview-author", work.author));
       list.appendChild(row);
+    });
+    section.appendChild(list);
+    return section;
+  }
+
+  function curatedWorkFromId(id) {
+    var parts = String(id || "").split("/");
+    if (parts.length < 2) return null;
+    var edition = findEdition(parts[0]);
+    var work = edition && findWork(edition, parts.slice(1).join("/"));
+    if (!edition || !work || !isArchivedEdition(edition)) return null;
+    return { edition: edition, work: work, id: id };
+  }
+
+  function renderTopicGuides() {
+    var guides = window.ARCHIVE_GUIDES && window.ARCHIVE_GUIDES.collections;
+    if (!Array.isArray(guides) || !guides.length) return null;
+    var section = el("section", "home-section topic-guides");
+    section.id = "reading-guides";
+    var header = el("div", "topic-guides-head");
+    header.appendChild(el("span", "home-eyebrow", "READING PATHS"));
+    header.appendChild(el("h2", "home-section-title", "循着主题读"));
+    header.appendChild(el("p", "home-section-copy", "从已封存作品中挑选几条轻量导读；每条路线都可以随时更换。"));
+    section.appendChild(header);
+    var list = el("div", "topic-guide-list");
+    guides.forEach(function (guide) {
+      var works = (guide.workIds || []).map(curatedWorkFromId).filter(Boolean);
+      if (!works.length) return;
+      var card = el("article", "topic-guide-card");
+      card.appendChild(el("h3", "topic-guide-title", guide.title || "主题选集"));
+      card.appendChild(el("p", "topic-guide-audience", guide.audience || ""));
+      card.appendChild(el("p", "topic-guide-description", guide.description || ""));
+      var minutes = works.reduce(function (sum, item) {
+        return sum + Math.max(1, Math.ceil((Number(item.work.chars) || 0) / 400));
+      }, 0);
+      card.appendChild(el("p", "topic-guide-meta",
+        works.length + " 篇 · 约 " + minutes + " 分钟"));
+      var worksList = el("ol", "topic-guide-works");
+      works.forEach(function (item, index) {
+        var row = el("li");
+        var link = el("a", "topic-guide-work", item.work.title);
+        link.href = "#/" + item.edition.slug + "/" + encodeURIComponent(item.work.slug);
+        row.appendChild(link);
+        if (guide.reasons && guide.reasons[index]) {
+          row.appendChild(el("span", "topic-guide-reason", guide.reasons[index]));
+        }
+        worksList.appendChild(row);
+      });
+      card.appendChild(worksList);
+      list.appendChild(card);
+    });
+    if (!list.children.length) return null;
+    section.appendChild(list);
+    return section;
+  }
+
+  function renderRelatedGuides(edition, work) {
+    if (!isArchivedEdition(edition)) return null;
+    var id = workId(edition.slug, work.slug);
+    var guides = window.ARCHIVE_GUIDES && window.ARCHIVE_GUIDES.collections;
+    if (!Array.isArray(guides)) return null;
+    var picks = [];
+    guides.some(function (guide) {
+      var ids = guide.workIds || [];
+      var currentIndex = ids.indexOf(id);
+      if (currentIndex < 0) return false;
+      ids.forEach(function (candidateId, index) {
+        if (candidateId === id || picks.length >= 3) return;
+        var item = curatedWorkFromId(candidateId);
+        if (!item || picks.some(function (picked) { return picked.id === candidateId; })) return;
+        picks.push({
+          item: item,
+          reason: guide.reasons && guide.reasons[index] || "同一主题选集中的另一篇作品",
+        });
+      });
+      return picks.length >= 3;
+    });
+    if (!picks.length) return null;
+    var section = el("section", "related-guide-picks");
+    section.appendChild(el("h2", "related-guide-title", "读后还可以看看"));
+    section.appendChild(el("p", "related-guide-copy", "这些历史作品与当前篇目共享主题导读，可直接跳读。"));
+    var list = el("div", "related-guide-list");
+    picks.forEach(function (pick) {
+      var link = el("a", "related-guide-item");
+      link.href = "#/" + pick.item.edition.slug + "/" + encodeURIComponent(pick.item.work.slug);
+      link.appendChild(el("strong", null, pick.item.work.title));
+      link.appendChild(el("span", null, pick.reason));
+      list.appendChild(link);
     });
     section.appendChild(list);
     return section;
@@ -8724,6 +10333,332 @@
     link.appendChild(el("span", "home-resume-title", entry.work.title));
     link.appendChild(el("span", "home-resume-meta", "已读约 " + percent + "% →"));
     return link;
+  }
+
+  var readingShelfFilter = "all";
+  var readingShelfLoadSequence = 0;
+  var readingShelfCloudError = "";
+  var cloudMyRatingIds = Object.create(null);
+
+  function readingShelfWork(id) {
+    var parts = String(id || "").split("/");
+    if (parts.length < 2) return null;
+    var edition = findEdition(parts[0]);
+    var work = edition && findWork(edition, parts.slice(1).join("/"));
+    return edition && work ? { id: id, edition: edition, work: work } : null;
+  }
+
+  function readingShelfIds() {
+    var ids = Object.create(null);
+    Object.keys(readingShelf.entries).forEach(function (id) { ids[id] = true; });
+    Object.keys(readingState.entries).forEach(function (id) { ids[id] = true; });
+    editions.forEach(function (edition) {
+      starsOf(edition.slug).forEach(function (slug) {
+        ids[workId(edition.slug, slug)] = true;
+      });
+    });
+    return Object.keys(ids).filter(function (id) { return !!readingShelfWork(id); });
+  }
+
+  function guestReadingEntriesForMerge() {
+    var merged = Object.create(null);
+    var guestShelf = loadReadingShelf(READING_SHELF_KEY);
+    [guestShelf.entries || {}, guestReadingState.entries || {}].forEach(function (entries) {
+      Object.keys(entries).forEach(function (id) {
+        var entry = entries[id];
+        if (!entry || !readingShelfWork(id)) return;
+        var current = merged[id];
+        if (!current || String(entry.updatedAt || "") > String(current.updatedAt || "")) {
+          merged[id] = Object.assign({}, entry);
+        }
+      });
+    });
+    return merged;
+  }
+
+  function readingMergeDismissalKey(user) {
+    return "mythos.reading-merge-dismissed::" + encodeURIComponent(user.qq);
+  }
+
+  function saveReadingMergeDismissal(user, value) {
+    try {
+      localStorage.setItem(readingMergeDismissalKey(user), value);
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function mergeGuestReadingIntoAccount(user, confirmImport) {
+    var guestEntries = guestReadingEntriesForMerge();
+    var ids = Object.keys(guestEntries);
+    if (!user || !ids.length) return 0;
+    if (confirmImport) {
+      ids.forEach(function (id) {
+        var incoming = guestEntries[id];
+        var existing = readingShelf.entries[id];
+        if (!existing || String(incoming.updatedAt || "") > String(existing.updatedAt || "")) {
+          readingShelf.entries[id] = incoming;
+        }
+      });
+      persistReadingShelf();
+      if (!saveReadingMergeDismissal(user, "merged")) {
+        showToast("阅读记录已合并，但本机无法保存合并状态；下次登录时可能再次询问。");
+      }
+      syncCloudReadingShelf().catch(function (error) {
+        readingShelfCloudError = error.message || String(error);
+        if (state.view === "reading") renderReadingShelf(true);
+      });
+      return ids.length;
+    }
+    if (!saveReadingMergeDismissal(user, "dismissed")) {
+      showToast("本机无法保存此选择，下次登录时可能再次询问。");
+    }
+    return ids.length;
+  }
+
+  function clearPersonalReadingHistory() {
+    var isAccount = !!(USE_CLOUD && currentUser());
+    if (!window.confirm("清除" + (isAccount ? "当前账号云端及本机" : "此设备") + "的阅读进度、已读和稍后读状态？收藏不会被清除。")) return;
+    var applyClear = function (generation) {
+      readingShelf = { entries: {}, generation: Math.max(0, Number(generation) || 0) };
+      readingState = { entries: {} };
+      persistReadingShelf();
+      persistReadingState();
+      if (state.view === "reading") renderReadingShelf(true);
+    };
+    if (isAccount) {
+      var targetQq = currentUser().qq;
+      window.MythosAPI.call("clearReadingShelf")
+        .then(function (result) {
+          if (!currentUser() || currentUser().qq !== targetQq) return;
+          applyClear(result && result.generation);
+        })
+        .catch(function (error) {
+          readingShelfCloudError = error.message || String(error);
+          if (state.view === "reading") renderReadingShelf(true);
+        });
+      return;
+    }
+    applyClear(0);
+  }
+
+  function renderReadingShelf(skipCloudLoad) {
+    stopReadingTracking();
+    setQuoteSelectionContext(null);
+    if (sectionObserver) {
+      sectionObserver.disconnect();
+      sectionObserver = null;
+    }
+    clear(refs.content);
+    var shell = el("section", "reading-shelf-page");
+    var head = el("header", "reading-shelf-head");
+    head.appendChild(el("span", "home-eyebrow", "YOUR READING"));
+    head.appendChild(el("h1", "home-section-title", "我的阅读"));
+    head.appendChild(el("p", "home-section-copy",
+      currentUser() && USE_CLOUD
+        ? "进度、已读与稍后读会同步到当前账号；收藏和评议仍沿用已有数据。"
+        : "阅读进度、已读与稍后读只保存在此设备；登录后可选择合并到账号。"));
+    shell.appendChild(head);
+
+    var user = currentUser();
+    var cloudStatus = el("p", "reading-shelf-sync-status", "");
+    if (user && USE_CLOUD) {
+      cloudStatus.textContent = readingShelfCloudError
+        ? "云端同步暂时失败：" + readingShelfCloudError
+        : "正在同步账号阅读记录…";
+    } else {
+      cloudStatus.textContent = "仅保存在此设备";
+    }
+    shell.appendChild(cloudStatus);
+
+    if (user && USE_CLOUD) {
+      var guestEntries = guestReadingEntriesForMerge();
+      var importKey = readingMergeDismissalKey(user);
+      var dismissed = "";
+      try { dismissed = localStorage.getItem(importKey) || ""; } catch (error) { /* storage may be blocked */ }
+      var guestCount = Object.keys(guestEntries).length;
+      if (guestCount && !dismissed) {
+        var mergeBox = el("aside", "reading-merge-prompt");
+        mergeBox.appendChild(el("strong", null, "发现此设备已有 " + guestCount + " 条阅读记录"));
+        mergeBox.appendChild(el("p", null, "可以合并到当前账号；同一篇以最近更新时间为准。原设备记录仍会保留。"));
+        var mergeActions = el("div", "reading-shelf-actions");
+        var mergeButton = el("button", "btn btn-tiny", "合并本机记录");
+        mergeButton.type = "button";
+        mergeButton.addEventListener("click", function () {
+          var count = mergeGuestReadingIntoAccount(user, true);
+          readingShelfCloudError = "";
+          cloudStatus.textContent = "已将 " + count + " 条本机记录加入账号同步队列。";
+          renderReadingShelf(true);
+        });
+        var keepLocalButton = el("button", "btn-ghost btn-tiny", "仅保留在本机");
+        keepLocalButton.type = "button";
+        keepLocalButton.addEventListener("click", function () {
+          mergeGuestReadingIntoAccount(user, false);
+          renderReadingShelf(true);
+        });
+        mergeActions.appendChild(mergeButton);
+        mergeActions.appendChild(keepLocalButton);
+        mergeBox.appendChild(mergeActions);
+        shell.appendChild(mergeBox);
+      }
+    }
+
+    var toolbar = el("div", "reading-shelf-toolbar");
+    var filters = [
+      ["all", "全部"],
+      ["in-progress", "在读"],
+      ["favorites", "收藏"],
+      ["read", "已读"],
+      ["later", "稍后读"],
+      ["unrated", "待评"],
+    ];
+    filters.forEach(function (filter) {
+      var button = el("button", "reading-shelf-filter", filter[1]);
+      button.type = "button";
+      button.classList.toggle("is-active", readingShelfFilter === filter[0]);
+      button.setAttribute("aria-pressed", readingShelfFilter === filter[0] ? "true" : "false");
+      button.addEventListener("click", function () {
+        readingShelfFilter = filter[0];
+        renderReadingShelf(true);
+      });
+      toolbar.appendChild(button);
+    });
+    var controls = el("div", "reading-shelf-actions");
+    if (USE_CLOUD && user) {
+      var refreshShelf = el("button", "btn-ghost btn-tiny", "同步记录");
+      refreshShelf.type = "button";
+      refreshShelf.addEventListener("click", function () {
+        readingShelfCloudError = "";
+        renderReadingShelf(false);
+      });
+      controls.appendChild(refreshShelf);
+      var feedbackStatus = el("button", "btn-ghost btn-tiny", "我的问题反馈");
+      feedbackStatus.type = "button";
+      feedbackStatus.addEventListener("click", openMyFeedbackStatus);
+      controls.appendChild(feedbackStatus);
+    }
+    var clearButton = el("button", "btn-ghost btn-tiny", "清除阅读记录");
+    clearButton.type = "button";
+    clearButton.addEventListener("click", clearPersonalReadingHistory);
+    controls.appendChild(clearButton);
+    toolbar.appendChild(controls);
+    shell.appendChild(toolbar);
+
+    var ids = readingShelfIds();
+    var categories = {
+      all: ids,
+      "in-progress": ids.filter(function (id) {
+        var entry = readingShelf.entries[id] || readingState.entries[id] || {};
+        return !entry.markedReadAt && !entry.laterAt && (Number(entry.progress) > 0 || !!entry.position);
+      }),
+      favorites: ids.filter(function (id) {
+        var item = readingShelfWork(id);
+        return item && isStarred(item.edition.slug, item.work.slug);
+      }),
+      read: ids.filter(function (id) {
+        var entry = readingShelf.entries[id] || readingState.entries[id] || {};
+        return !!entry.markedReadAt;
+      }),
+      later: ids.filter(function (id) {
+        return !!(readingShelf.entries[id] && readingShelf.entries[id].laterAt);
+      }),
+      unrated: [],
+    };
+    var ratingIds = user && USE_CLOUD ? (cloudMyRatingIds[user.qq] || []) : [];
+    if (user && USE_CLOUD && !Object.prototype.hasOwnProperty.call(cloudMyRatingIds, user.qq)) {
+      cloudStatus.textContent = readingShelfCloudError || "正在同步账号阅读记录与评议状态…";
+    }
+    editions.forEach(function (edition) {
+      if (!votingOpen(edition.slug)) return;
+      edition.works.forEach(function (work) {
+        var id = workId(edition.slug, work.slug);
+        var rated = user && USE_CLOUD
+          ? ratingIds.indexOf(id) !== -1
+          : !!myRatingOf(id);
+        if (user && !rated) categories.unrated.push(id);
+      });
+    });
+    var categoryLabel = {
+      "in-progress": "在读",
+      favorites: "收藏",
+      read: "已读",
+      later: "稍后读",
+      unrated: "待评",
+    };
+    var selectedIds = categories[readingShelfFilter] || categories.all;
+    var list = el("div", "reading-shelf-list");
+    if (!selectedIds.length) {
+      list.appendChild(el("p", "reading-shelf-empty",
+        readingShelfFilter === "unrated"
+          ? (votingOpen(RATING_PROGRESS_EDITION) ? "当前没有待评作品。" : "当前没有开放大众评分的届次。")
+          : "这里还没有作品。打开一篇档案后，阅读记录会出现在这里。"));
+    }
+    selectedIds.forEach(function (id) {
+      var item = readingShelfWork(id);
+      if (!item) return;
+      var entry = readingShelf.entries[id] || readingState.entries[id] || {};
+      var row = el("article", "reading-shelf-item");
+      var link = el("a", "reading-shelf-link");
+      link.href = "#/" + item.edition.slug + "/" + encodeURIComponent(item.work.slug);
+      link.appendChild(el("span", "reading-shelf-item-meta",
+        String(item.edition.year) + " · " + String(item.work.no).padStart(3, "0") +
+          (readingShelfFilter === "unrated" ? " · 本届评议" : "")));
+      link.appendChild(el("strong", "reading-shelf-item-title", item.work.title));
+      if (entry.updatedAt || entry.progress) {
+        link.appendChild(el("span", "reading-shelf-item-progress",
+          "已读约 " + Math.round(clampReadingProgress(entry.progress) * 100) + "%"));
+      }
+      row.appendChild(link);
+      var rowActions = el("div", "reading-shelf-item-actions");
+      var laterButton = el("button", "btn-ghost btn-tiny", entry.laterAt ? "移出稍后读" : "稍后读");
+      laterButton.type = "button";
+      laterButton.setAttribute("aria-pressed", entry.laterAt ? "true" : "false");
+      laterButton.addEventListener("click", function () {
+        setReadingLater(id, !entry.laterAt);
+        renderReadingShelf(true);
+      });
+      rowActions.appendChild(laterButton);
+      if (!entry.markedReadAt) {
+        var readButton = el("button", "btn-ghost btn-tiny", "标记已读");
+        readButton.type = "button";
+        readButton.addEventListener("click", function () {
+          setReadingMarkedRead(id, true);
+          renderReadingShelf(true);
+        });
+        rowActions.appendChild(readButton);
+      } else {
+        rowActions.appendChild(el("span", "reading-shelf-read-label", categoryLabel.read));
+      }
+      row.appendChild(rowActions);
+      list.appendChild(row);
+    });
+    shell.appendChild(list);
+    refs.content.appendChild(shell);
+
+    if (!skipCloudLoad && USE_CLOUD && user) {
+      var sequence = ++readingShelfLoadSequence;
+      readingShelfCloudError = "";
+      cloudStatus.textContent = "正在同步账号阅读记录与评议状态…";
+      var tasks = [syncCloudReadingShelf()];
+      editions.forEach(function (edition) {
+        tasks.push(loadCloudStars(edition.slug));
+      });
+      tasks.push(window.MythosAPI.call("getMyRatingWorkIds").then(function (data) {
+        if (currentUser() && currentUser().qq === user.qq) {
+          cloudMyRatingIds[user.qq] = Array.isArray(data && data.workIds) ? data.workIds : [];
+        }
+      }));
+      Promise.all(tasks).then(function () {
+        if (sequence !== readingShelfLoadSequence || state.view !== "reading" || !currentUser() || currentUser().qq !== user.qq) return;
+        readingShelfCloudError = "";
+        renderReadingShelf(true);
+      }).catch(function (error) {
+        if (sequence !== readingShelfLoadSequence || state.view !== "reading") return;
+        readingShelfCloudError = error.message || String(error);
+        renderReadingShelf(true);
+      });
+    }
   }
 
   function renderHome() {
@@ -8838,6 +10773,8 @@
     if (resume) heroState.appendChild(resume);
     shell.appendChild(heroState);
     shell.appendChild(renderHomeCataloguePreview(edition));
+    var guides = renderTopicGuides();
+    if (guides) shell.appendChild(guides);
     shell.appendChild(renderArchiveVolumes());
     var footer = el("footer", "home-footer home-imprint");
     var imprintHead = el("div", "home-imprint-head");
@@ -8862,6 +10799,10 @@
     imprintFoot.appendChild(
       el("span", null, buildDate ? "最近更新 · " + buildDate : "持续更新中"),
     );
+    var informationButton = el("button", "btn-ghost btn-tiny home-information-link", "本站说明、评论规则与数据使用");
+    informationButton.type = "button";
+    informationButton.addEventListener("click", openSiteInformation);
+    imprintFoot.appendChild(informationButton);
     footer.appendChild(imprintFoot);
     shell.appendChild(footer);
     refs.content.appendChild(shell);
@@ -8893,13 +10834,17 @@
     stopReadingTracking();
     setQuoteSelectionContext(null);
     state.refreshEditionList = null;
-    state.onlyUnrated = false;
-    state.catalogueSort = "number";
-    state.catalogueLength = "all";
     if (!edition) {
       renderHome();
       return;
     }
+    var catalogueState = catalogueStateFromUrlOrSession(edition.slug);
+    state.catalogueEditionSlug = edition.slug;
+    state.catalogueKeyword = catalogueState.keyword;
+    state.onlyUnrated = catalogueState.onlyUnrated;
+    state.catalogueSort = catalogueState.sort;
+    state.catalogueLength = catalogueState.length;
+    state.catalogueRandomSeed = catalogueState.randomSeed || (catalogueState.sort === "random" ? newId() : "");
     if (sectionObserver) {
       sectionObserver.disconnect();
       sectionObserver = null;
@@ -8970,7 +10915,7 @@
     var search = el("input", "edition-search");
     search.type = "search";
     search.placeholder = "搜索标题或编号";
-    search.value = state.keyword;
+    search.value = state.catalogueKeyword;
     search.setAttribute("aria-label", "搜索本届作品");
     searchWrap.appendChild(search);
     controls.appendChild(searchWrap);
@@ -8987,6 +10932,9 @@
         button.type = "button";
         button.setAttribute("aria-label", optionData[2] || optionData[1]);
         button.addEventListener("click", function () {
+          if (key === "catalogueSort" && optionData[0] === "random" && !state.catalogueRandomSeed) {
+            state.catalogueRandomSeed = newId();
+          }
           state[key] = optionData[0];
           paint();
         });
@@ -9012,6 +10960,10 @@
     var resultTools = el("div", "edition-result-tools");
     var hint = el("span", "edition-count-hint");
     resultTools.appendChild(hint);
+    var clearFilters = el("button", "btn-ghost btn-tiny edition-clear-filters", "清除筛选");
+    clearFilters.type = "button";
+    clearFilters.hidden = true;
+    resultTools.appendChild(clearFilters);
     var filterUnrated = null;
     if (ratingProgressAvailable(edition)) {
       filterUnrated = el("button", "btn-ghost btn-tiny edition-unrated-filter", "只看未评");
@@ -9025,22 +10977,16 @@
 
     var list = el("div", "edition-index");
     shell.appendChild(list);
-    var randomOrder = edition.works.slice().sort(function () {
-      return Math.random() - 0.5;
-    });
-    var randomRank = {};
-    randomOrder.forEach(function (work, index) {
-      randomRank[work.slug] = index;
-    });
     function paint() {
       closeEditionRatingTip();
       clear(list);
+      persistCatalogueState(edition.slug);
       choiceButtons.forEach(function (choice) {
         var active = state[choice.key] === choice.value;
         choice.button.classList.toggle("is-active", active);
         choice.button.setAttribute("aria-pressed", active ? "true" : "false");
       });
-      var needle = state.keyword.trim().toLowerCase();
+      var needle = state.catalogueKeyword.trim().toLowerCase();
       var progress = ratingProgressAvailable(edition)
         ? (USE_CLOUD ? cloudRatingProgress[edition.slug] : localRatingProgress(edition))
         : null;
@@ -9060,8 +11006,17 @@
         if (state.catalogueLength === "long" && !(chars > 4000)) return false;
         return !needle || workSearchText(work).indexOf(needle) !== -1;
       });
+      var randomRank = Object.create(null);
+      if (state.catalogueSort === "random") {
+        edition.works.forEach(function (work) {
+          randomRank[work.slug] =
+            parseInt(readingTextHash(state.catalogueRandomSeed + "::" + work.slug), 36) || 0;
+        });
+      }
       shown.sort(function (a, b) {
-        if (state.catalogueSort === "random") return randomRank[a.slug] - randomRank[b.slug];
+        if (state.catalogueSort === "random") {
+          return randomRank[a.slug] - randomRank[b.slug] || Number(a.no) - Number(b.no);
+        }
         if (state.catalogueSort === "length-asc" || state.catalogueSort === "length-desc") {
           var aChars = Number(a.chars) || 0;
           var bChars = Number(b.chars) || 0;
@@ -9090,12 +11045,14 @@
         filterUnrated.textContent = state.onlyUnrated ? "显示全部作品" : "只看未评";
         filterUnrated.setAttribute("aria-pressed", state.onlyUnrated ? "true" : "false");
       }
+      clearFilters.hidden = catalogueStateIsDefault();
       if (!shown.length) {
         list.appendChild(el("p", "spotlight-empty", "没有匹配的作品。"));
         return;
       }
       shown.forEach(function (work) {
         var row = el("div", "edition-index-row");
+        row.dataset.workSlug = work.slug;
         var starred = isStarred(edition.slug, work.slug);
         var star = el("button", "edition-index-star");
         star.type = "button";
@@ -9113,6 +11070,9 @@
         row.appendChild(el("span", "edition-index-no", String(work.no).padStart(3, "0")));
         var title = el("a", "edition-index-title");
         title.href = "#/" + edition.slug + "/" + encodeURIComponent(work.slug);
+        title.addEventListener("click", function () {
+          saveCatalogueReturnPosition(edition.slug);
+        });
         title.appendChild(el("span", "edition-index-title-text", work.title));
         var spotlightInfo = spotlightForWork(spotlightCache[edition.slug], edition, work);
         if (spotlightInfo && spotlightInfo.date) {
@@ -9129,7 +11089,7 @@
         var readProgress = readEntry ? clampReadingProgress(readEntry.progress) : 0;
         var readDot = el("span", "edition-index-read");
         readDot.style.setProperty("--read", Math.round(readProgress * 100) + "%");
-        readDot.title = readProgress ? "已读约 " + Math.round(readProgress * 100) + "%" : "尚未开始阅读";
+        readDot.title = readProgress ? "正文进度约 " + Math.round(readProgress * 100) + "%" : "尚未开始阅读";
         readDot.setAttribute("aria-hidden", "true");
         meta.appendChild(readDot);
         meta.appendChild(
@@ -9201,13 +11161,23 @@
         paint();
       });
     }
+    clearFilters.addEventListener("click", function () {
+      state.catalogueKeyword = "";
+      state.onlyUnrated = false;
+      state.catalogueSort = "number";
+      state.catalogueLength = "all";
+      state.catalogueRandomSeed = "";
+      search.value = "";
+      paint();
+    });
     search.addEventListener("input", function () {
-      state.keyword = search.value;
+      state.catalogueKeyword = search.value;
       paint();
     });
     paint();
     state.refreshEditionList = paint;
     refs.content.appendChild(shell);
+    restoreCatalogueReturnPosition(edition.slug);
     loadSpotlight(edition.slug)
       .then(function () {
         if (state.view === "edition" && state.editionSlug === edition.slug) paint();
@@ -9306,6 +11276,7 @@
 
   function renderWork(edition, work) {
     clear(refs.content);
+    activeReaderRerender = null;
     state.refreshEditionList = null;
     var id = workId(edition.slug, work.slug);
     recordReadingOpen(edition, work);
@@ -9321,7 +11292,7 @@
       pendingPanelJump = jumpPanelId;
       var target = sheet.querySelector("#" + jumpPanelId);
       if (target) {
-        target.scrollIntoView({ behavior: "smooth", block: "start" });
+        target.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
       }
     }
 
@@ -9333,6 +11304,9 @@
         ? sectionsFromHtml(contentOverride.html)
         : work.sections || [];
       var savedScrollY = preserveScroll ? window.scrollY : 0;
+      var savedReadingPosition = preserveScroll && activeReadingId === id && readingProgressParts && readingProgressParts.getPosition
+        ? readingProgressParts.getPosition()
+        : null;
       var frame = el("div", "reader-frame");
       var sheet = el("div", "sheet");
 
@@ -9458,7 +11432,19 @@
         "章节",
         sections.length ? sections.length + " 节" : "正文",
       );
-      cardBody.appendChild(cardFields);
+      var primaryFields = el("div", "work-card-fields work-card-fields-primary");
+      if (cardFields.firstElementChild) primaryFields.appendChild(cardFields.firstElementChild);
+      var metaDetails = el("details", "work-meta-details");
+      metaDetails.open = window.matchMedia ? window.matchMedia("(min-width: 801px)").matches : true;
+      var metaSummary = el("summary", null, "档案资料");
+      metaDetails.appendChild(metaSummary);
+      var metaDetailsBody = el("div", "work-meta-details-body");
+      var secondaryFields = el("div", "work-card-fields work-card-fields-secondary");
+      while (cardFields.firstElementChild) secondaryFields.appendChild(cardFields.firstElementChild);
+      metaDetailsBody.appendChild(secondaryFields);
+      metaDetails.appendChild(metaDetailsBody);
+      cardBody.appendChild(primaryFields);
+      cardBody.appendChild(metaDetails);
 
       if (anonymous) {
         var publicAwards = editionAwardsData(edition.slug);
@@ -9467,7 +11453,7 @@
           publicAwards.published &&
           Array.isArray(publicAwards.awardedWorkIds) &&
           publicAwards.awardedWorkIds.indexOf(id) !== -1;
-        cardBody.appendChild(
+        metaDetailsBody.appendChild(
           el(
             "p",
             "work-anon-note",
@@ -9493,7 +11479,7 @@
       } else {
         spotlightNote.hidden = true;
       }
-      cardBody.appendChild(spotlightNote);
+      metaDetailsBody.appendChild(spotlightNote);
       var readingProgress = el("div", "reading-progress");
       var readingTrack = el("div", "reading-progress-track");
       readingTrack.setAttribute("role", "progressbar");
@@ -9505,6 +11491,21 @@
       readingTrack.appendChild(readingBar);
       readingProgress.appendChild(readingTrack);
       readingProgress.appendChild(readingText);
+      var manualReadButton = el("button", "reading-manual-toggle", "标记已读");
+      manualReadButton.type = "button";
+      function refreshManualReadButton() {
+        var entry = readingEntryOf(id);
+        var markedRead = !!(entry && entry.markedReadAt);
+        manualReadButton.textContent = markedRead ? "已标记已读" : "标记已读";
+        manualReadButton.setAttribute("aria-pressed", markedRead ? "true" : "false");
+      }
+      manualReadButton.addEventListener("click", function () {
+        var entry = readingEntryOf(id);
+        setReadingMarkedRead(id, !(entry && entry.markedReadAt));
+        refreshManualReadButton();
+      });
+      refreshManualReadButton();
+      readingProgress.appendChild(manualReadButton);
       cardBody.appendChild(readingProgress);
       var jumpRow = el("div", "work-jump-row");
       var shareButton = el("button", "btn-ghost work-jump-btn");
@@ -9555,6 +11556,13 @@
         renderToc();
       });
       jumpRow.appendChild(bookmarkButton);
+      var feedbackButton = el("button", "btn-ghost work-jump-btn work-feedback-button", "反馈问题");
+      feedbackButton.type = "button";
+      feedbackButton.title = canInteract() ? "向管理员提交此作品的问题" : "登录后可提交作品反馈";
+      feedbackButton.addEventListener("click", function () {
+        openWorkFeedback(edition, work);
+      });
+      jumpRow.appendChild(feedbackButton);
       if (isAdmin() && USE_CLOUD) {
         var editBody = el("button", "btn-ghost work-jump-btn", "编辑正文");
         editBody.type = "button";
@@ -9601,9 +11609,19 @@
         settingsPanel.appendChild(group);
       }
       function applyReaderSettings() {
+        var savedPosition = activeReadingId === id && readingProgressParts && readingProgressParts.getPosition
+          ? readingProgressParts.getPosition()
+          : null;
         body.style.fontSize = Number(readerSettings.fontSize) + "px";
         body.style.lineHeight = String(readerSettings.lineHeight);
         frame.style.setProperty("--reader-sheet-width", Number(readerSettings.width) + "px");
+        if (savedPosition) {
+          window.requestAnimationFrame(function () {
+            if (activeReadingId !== id) return;
+            restoreReadingAnchor(prepareReadingAnchors(body, contentOverride && contentOverride.updatedAt), savedPosition);
+            if (readingProgressParts && readingProgressParts.refresh) readingProgressParts.refresh();
+          });
+        }
       }
       function refreshSettingButtons() {
         settingButtons.forEach(function (entry) {
@@ -9639,6 +11657,8 @@
         sheet.appendChild(renderWorkPublicStats(id, work));
       }
       sheet.appendChild(renderCommentPanel(id));
+      var relatedGuides = renderRelatedGuides(edition, work);
+      if (relatedGuides) sheet.appendChild(relatedGuides);
       frame.appendChild(sheet);
 
       var sectionNav = renderSectionNav(sections);
@@ -9648,7 +11668,7 @@
         compactTocButton.addEventListener("click", function () {
           var toggle = sectionNav.querySelector(".section-nav-toggle");
           if (toggle && !sectionNav.classList.contains("is-open")) toggle.click();
-          sectionNav.scrollIntoView({ behavior: "smooth", block: "start" });
+          sectionNav.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
         });
       }
 
@@ -9670,20 +11690,25 @@
           compactFill: compactFill,
           compactTrain: compactTrain,
           totalChars: cardChars,
+          body: body,
+          contentVersion: contentOverride && contentOverride.updatedAt,
           getValue: null,
         },
         !preserveScroll,
+        savedReadingPosition,
       );
       if (pendingPanelJump) {
         window.requestAnimationFrame(function () {
           var target = sheet.querySelector("#" + pendingPanelJump);
           if (target) {
-            target.scrollIntoView({ behavior: "smooth", block: "start" });
+            target.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
           }
         });
       }
       bindSectionSpy(sections);
     }
+
+    activeReaderRerender = function () { paint(true); };
 
     if (!USE_CLOUD) {
       paint();
@@ -9706,15 +11731,35 @@
           console.error(e);
         });
     }
-    if (isArchivedEdition(edition) && !cloudContent[id]) {
+    if ((isArchivedEdition(edition) || (cloudUnavailable && isStaticPublicEdition(edition))) && !cloudContent[id]) {
       loadStaticWorkContent(id)
         .then(function (content) {
           if (cloudContent[id]) return;
           cloudContent[id] = content;
           if (stillHere()) paint(true);
-        })
-        .catch(function () {
-          // 作品接口稍后会再次尝试静态正文；预取失败不提前打断阅读页。
+        }).catch(function (error) {
+          if (!cloudUnavailable || !stillHere()) return;
+          var bodyNode = refs.content.querySelector(".work-body");
+          if (!bodyNode) return;
+          clear(bodyNode);
+          bodyNode.appendChild(el("p", "work-body-error",
+            "在线服务未恢复，公开静态正文也暂时无法加载。"));
+          var retryBody = el("button", "btn-ghost work-body-retry", "重试加载正文");
+          retryBody.type = "button";
+          retryBody.addEventListener("click", function () {
+            retryBody.disabled = true;
+            retryBody.textContent = "正在加载…";
+            delete staticContent[id];
+            loadStaticWorkContent(id).then(function (content) {
+              cloudContent[id] = content;
+              if (stillHere()) paint(true);
+            }).catch(function () {
+              retryBody.disabled = false;
+              retryBody.textContent = "重试加载正文";
+            });
+          });
+          bodyNode.appendChild(retryBody);
+          if (error && error.message) retryBody.title = error.message;
         });
     }
     var spotlightPromise = loadSpotlight(edition.slug)
@@ -9740,9 +11785,10 @@
         }
       })
       .catch(function (e) {
-        console.error(e);
+        if (!cloudUnavailable) console.error(e);
         if (!stillHere()) return;
         if (cloudContent[id]) return;
+        if (cloudUnavailable && isStaticPublicEdition(edition)) return;
         var showBundleError = function () {
           if (!stillHere() || cloudContent[id]) return;
           var loading = refs.content.querySelector(".work-body-loading");
@@ -9772,7 +11818,7 @@
       })
       .catch(function (e) {
         // 星标失败不影响正文、评论和评分的展示；保留日志以便后续排查。
-        console.error(e);
+        if (!cloudUnavailable) console.error(e);
       });
 
     Promise.all([bundlePromise, starsPromise, spotlightPromise]).catch(function () {
@@ -9852,10 +11898,6 @@
   }
 
   function route() {
-    if (!isLoggedIn()) {
-      showAuthGate();
-      return;
-    }
     state.refreshEditionList = null;
     refreshChrome();
     setTopMenuOpen(false);
@@ -9867,6 +11909,17 @@
     var parts = hash ? hash.split("/") : [];
     var editionSlug = parts[0] ? decodeURIComponent(parts[0]) : "";
     var workSlug = parts[1] ? decodeURIComponent(parts[1]) : "";
+
+    if (editionSlug === "__reading") {
+      state.workSlug = "";
+      state.view = "reading";
+      setDocumentTitle(["我的阅读"]);
+      setLayoutMode("reading");
+      hideHud();
+      renderReadingShelf();
+      updateWitchContext();
+      return;
+    }
 
     if (!editionSlug) {
       state.workSlug = "";
@@ -9966,6 +12019,74 @@
     if (panel) panel.hidden = true;
   }
 
+  var cloudUnavailable = false;
+
+  function hidePublicModeNotice() {
+    var notice = document.getElementById("public-mode-notice");
+    if (notice) {
+      notice.hidden = true;
+      clear(notice);
+    }
+  }
+
+  function showPublicModeNotice(error) {
+    if (!USE_CLOUD) return;
+    cloudUnavailable = true;
+    var notice = document.getElementById("public-mode-notice");
+    if (!notice) return;
+    clear(notice);
+    notice.appendChild(el("span", "public-mode-copy",
+      "在线服务暂不可用，可继续阅读公开档案；评分、评论和收藏暂不可用。"));
+    var retry = el("button", "public-mode-retry", "重试连接");
+    retry.type = "button";
+    retry.addEventListener("click", function () {
+      if (retry.disabled) return;
+      retry.disabled = true;
+      retry.textContent = "连接中…";
+      bootApp().then(function () {
+        if (cloudUnavailable) {
+          retry.disabled = false;
+          retry.textContent = "重试连接";
+        }
+      }).catch(function (retryError) {
+        showPublicModeNotice(retryError);
+      });
+    });
+    notice.appendChild(retry);
+    notice.hidden = false;
+    loadPublicStaticIntoReader();
+  }
+
+  function loadPublicStaticIntoReader() {
+    if (!cloudUnavailable || state.view !== "reader") return;
+    var edition = findEdition(state.editionSlug);
+    var work = edition && findWork(edition, state.workSlug);
+    if (!edition || !work || !isStaticPublicEdition(edition)) return;
+    var id = workId(edition.slug, work.slug);
+    if (cloudContent[id]) return;
+    loadStaticWorkContent(id).then(function (content) {
+      if (!cloudUnavailable || state.view !== "reader" || state.editionSlug !== edition.slug || state.workSlug !== work.slug) return;
+      cloudContent[id] = content;
+      if (activeReaderRerender) activeReaderRerender();
+    }).catch(function () {
+      /* 页面内的正文级重试会说明静态内容也不可用。 */
+    });
+  }
+
+  window.addEventListener("mythos:connection-error", function () {
+    showPublicModeNotice();
+  });
+  window.addEventListener("mythos:connection-restored", function () {
+    if (!cloudUnavailable) return;
+    cloudUnavailable = false;
+    hidePublicModeNotice();
+  });
+  window.addEventListener("online", function () {
+    if (cloudUnavailable && refs.authGate.hidden) {
+      bootApp().catch(function (error) { showPublicModeNotice(error); });
+    }
+  });
+
   function showBootError(error) {
     // 只有确实被启动遮罩挡住的主入口才弹全屏失败面板；
     // 深链接的 prerender 页面正文是静态内容，不需要接口也能读，保持原兜底路径。
@@ -10003,16 +12124,32 @@
     }
   }
 
+  function restoreSharedSearchFromUrl() {
+    var sharedQuery = new URLSearchParams(window.location.search).get("find");
+    if (!sharedQuery || !sharedQuery.trim()) return;
+    refs.siteSearchInput.value = sharedQuery;
+    openGlobalSearchPanel();
+  }
+
   function bootApp() {
     closeBootError();
     return ensureAdminSeed()
       .then(function () {
-        if (USE_CLOUD) return cloudBootstrap();
+        if (USE_CLOUD) {
+          return cloudBootstrap().then(function (data) {
+            cloudUnavailable = false;
+            hidePublicModeNotice();
+            return data;
+          }).catch(function (error) {
+            showPublicModeNotice(error);
+            return null;
+          });
+        }
         return null;
       })
       .then(function () {
-        if (!isLoggedIn()) showAuthGate();
-        else hideAuthGate();
+        hideAuthGate();
+        restoreSharedSearchFromUrl();
       });
   }
 

@@ -20,7 +20,7 @@ const WITCH_CUBE_ASSET = path.join(
   "witch-cube-v1.webp",
 );
 const BRAND_URL = "./archive-brand.webp?v=20260921-brand";
-const STATIC_VERSION = "20260926-rating-score-tips-v32";
+const STATIC_VERSION = "20260926-route-completion-v34";
 const BUILD_DATE = STATIC_VERSION.slice(0, 8).replace(/^(\d{4})(\d{2})(\d{2})$/, "$1.$2.$3");
 const PUBLIC_ORIGIN = String(process.env.ARCHIVE_PUBLIC_ORIGIN || "").replace(/\/+$/, "");
 const built = spawnSync(process.execPath, ["scripts/build-html.mjs"], {
@@ -33,6 +33,10 @@ if (built.status !== 0) process.exit(built.status || 1);
 const css = fs.readFileSync(path.join(ROOT, "viewer", "viewer.css"), "utf8");
 const apiClient = fs.readFileSync(
   path.join(ROOT, "viewer", "mythos-client.js"),
+  "utf8",
+);
+const guidesScript = fs.readFileSync(
+  path.join(ROOT, "viewer", "archive-guides.js"),
   "utf8",
 );
 const js = fs.readFileSync(path.join(ROOT, "viewer", "viewer.js"), "utf8");
@@ -52,8 +56,10 @@ const dataMatch =
 if (!dataMatch) throw new Error("无法从离线 HTML 提取 ARCHIVE_DATA");
 const payloadLiteral = dataMatch[1];
 const fullPayload = JSON.parse(JSON.parse(payloadLiteral));
+const isPublicEdition = (edition) =>
+  edition && (edition.status === "archived" || edition.status === "published");
 const webPayloadObject = {
-  editions: (fullPayload.editions || []).map((edition) => ({
+  editions: (fullPayload.editions || []).filter(isPublicEdition).map((edition) => ({
     ...edition,
     works: (edition.works || []).map((work) => {
       const { html, sections, authorQQ, ...catalogueWork } = work;
@@ -80,6 +86,7 @@ function writeArchiveContent(outputDir, payload) {
   let files = 0;
   let bytes = 0;
   for (const edition of payload.editions || []) {
+    if (!isPublicEdition(edition)) continue;
     for (const work of edition.works || []) {
       const dir = path.join(root, edition.slug);
       fs.mkdirSync(dir, { recursive: true });
@@ -160,14 +167,21 @@ function renderPrerenderArticle(edition, work) {
         <div class="work-card-body">
           <p class="work-fileno"><span class="work-fileno-vol">${escapeHtml(volumeLabel)}</span><span class="work-fileno-slash">·</span><span class="work-fileno-no">${escapeHtml(category)}</span></p>
           <h1 class="work-title">${escapeHtml(work.title)}</h1>
-          <div class="work-card-fields">
+          <div class="work-card-fields work-card-fields-primary">
             <div class="work-card-field"><span class="work-card-field-label">篇幅</span><strong class="work-card-field-value">${escapeHtml(chars)} 字${minutes ? ` · 约 ${minutes} 分钟` : ""}</strong></div>
+          </div>
+          <details class="work-meta-details">
+            <summary>档案资料</summary>
+            <div class="work-meta-details-body">
+          <div class="work-card-fields work-card-fields-secondary">
             <div class="work-card-field"><span class="work-card-field-label">阶段</span><strong class="work-card-field-value">${escapeHtml(status)}</strong></div>
             <div class="work-card-field${anonymous ? " is-anonymous" : ""}"><span class="work-card-field-label">作者</span><strong class="work-card-field-value">${escapeHtml(anonymous ? "匿名" : author)}</strong></div>
             <div class="work-card-field"><span class="work-card-field-label">章节</span><strong class="work-card-field-value">${sectionCount ? `${sectionCount} 节` : "正文"}</strong></div>
           </div>
           ${authorNote ? `<p class="work-anon-note">${escapeHtml(authorNote)}</p>` : ""}
           ${excerpt ? `<p class="prerender-excerpt"><strong>首段：</strong>${escapeHtml(excerpt)}</p>` : ""}
+            </div>
+          </details>
         </div>
         <span class="work-card-hole" aria-hidden="true"></span>
       </div>
@@ -228,6 +242,7 @@ function writePrerenderPages(outputDir, payload, baseHtml) {
   let files = 0;
   let bytes = 0;
   for (const edition of payload.editions || []) {
+    if (!isPublicEdition(edition)) continue;
     const editionDir = path.join(outputDir, edition.slug);
     fs.rmSync(editionDir, { recursive: true, force: true });
     for (const work of edition.works || []) {
@@ -324,6 +339,8 @@ ${DREAM_GATE_MARKUP}
     <button type="button" data-nav="catalogue">本届目录</button>
     <button type="button" data-nav="archive">历届档案</button>
     <button type="button" data-nav="guide">评议说明</button>
+    <button type="button" data-nav="reading">我的阅读</button>
+    <button type="button" data-nav="notifications" hidden>站内通知 <span class="notification-count" hidden></span></button>
     <button type="button" data-nav="results" hidden>投票公示</button>
   </nav>
   <div class="site-search" id="site-search">
@@ -339,6 +356,8 @@ ${DREAM_GATE_MARKUP}
   <button type="button" class="top-more" id="top-more" aria-controls="top-menu" aria-expanded="false" aria-label="更多操作">⋯</button>
   <div class="top-menu" id="top-menu">
     <button type="button" class="top-results" id="top-results" hidden>投票公示</button>
+    <button type="button" class="top-reading" id="top-reading">我的阅读</button>
+    <button type="button" class="top-notifications" id="top-notifications" hidden>站内通知 <span class="notification-count" id="notification-count" hidden></span></button>
     <div class="account-hud" id="account-hud" hidden></div>
     <button type="button" class="theme-toggle" id="theme-toggle" aria-label="切换到黑夜模式" title="切换到黑夜模式">☾ 黑夜</button>
   </div>
@@ -349,6 +368,7 @@ ${DREAM_GATE_MARKUP}
   <div class="boot-splash-title">正在开启梦之门…</div>
   <div class="boot-splash-sub">幻梦境档案馆</div>
 </div>
+<div class="public-mode-notice" id="public-mode-notice" role="status" aria-live="polite" hidden></div>
 ${BOOT_ERROR_MARKUP}
 <div class="auth-gate" id="auth-gate" hidden></div>
 <div class="modal-root" id="modal-root" hidden></div>
@@ -383,6 +403,7 @@ ${BOOT_ERROR_MARKUP}
 window.ARCHIVE_API_URL = ${JSON.stringify(API_URL)};
 </script>
 <script src="./archive-data.js?v=${STATIC_VERSION}"></script>
+<script src="./archive-guides.js?v=${STATIC_VERSION}"></script>
 <script src="./mythos-client.js?v=${STATIC_VERSION}"></script>
 <script src="./witch-assistant.js?v=${STATIC_VERSION}"></script>
 <script src="./viewer.js?v=${STATIC_VERSION}"></script>
@@ -395,6 +416,7 @@ fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(outDir, { recursive: true });
 fs.writeFileSync(path.join(outDir, "index.html"), html, "utf8");
 fs.writeFileSync(path.join(outDir, "viewer.css"), css, "utf8");
+fs.writeFileSync(path.join(outDir, "archive-guides.js"), guidesScript, "utf8");
 fs.writeFileSync(path.join(outDir, "mythos-client.js"), apiClient, "utf8");
 fs.writeFileSync(path.join(outDir, "dream-gate.js"), dreamGateScript, "utf8");
 fs.writeFileSync(path.join(outDir, "witch-assistant.js"), witchScript, "utf8");

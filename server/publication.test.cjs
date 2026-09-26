@@ -147,3 +147,156 @@ test("无奖项配置不虚构奖项；目录外评分使发布回滚", async (t
   assert.deepEqual(awards.specialAwards, []);
   assert.deepEqual(awards.authorReveals, {});
 });
+
+test("评论请求重试返回同一结果，删除后仍按账号去重", async (t) => {
+  const { call, db } = await fixture(t);
+  const request = {
+    workId: workIds[0],
+    body: "这条评论只应写入一次。",
+    anonymous: true,
+    requestId: "comment-retry-0001",
+  };
+  const first = await call("addComment", request, "token-11111");
+  const retry = await call("addComment", request, "token-11111");
+  assert.deepEqual(retry, first);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM comments WHERE qq = '11111'").get().n, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM comment_requests WHERE qq = '11111'").get().n, 1);
+  await assert.rejects(
+    call("addComment", { ...request, body: "被错误复用的请求编号" }, "token-11111"),
+    /已用于其他内容/,
+  );
+
+  await call("deleteComment", { id: first.comment.id }, "token-11111");
+  assert.deepEqual(await call("addComment", request, "token-11111"), first);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM comments WHERE qq = '11111'").get().n, 0);
+
+  db.prepare("INSERT INTO tokens (token, qq, role, exp) VALUES (?, ?, 'member', ?)")
+    .run("token-33333", "33333", Date.now() + 60000);
+  const otherAccount = await call("addComment", request, "token-33333");
+  assert.notEqual(otherAccount.comment.id, first.comment.id);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM comment_requests WHERE requestId = ?").get(request.requestId).n, 2);
+});
+
+test("阅读书架按账号隔离、按更新时间合并，清除版本阻止旧设备恢复记录", async (t) => {
+  const { call, db } = await fixture(t);
+  db.prepare("INSERT INTO tokens (token, qq, role, exp) VALUES (?, ?, 'member', ?)")
+    .run("token-33333", "33333", Date.now() + 60000);
+  const workId = workIds[0];
+  const newer = {
+    workId,
+    generation: 0,
+    progress: 0.42,
+    position: { version: "v1", anchor: "p-a-1", offset: 0.25 },
+    markedReadAt: "",
+    laterAt: "",
+    updatedAt: new Date(Date.now() - 2000).toISOString(),
+  };
+  await assert.rejects(call("getReadingShelf"), /请登录/);
+  await call("saveReadingState", newer, "token-33333");
+  await call("saveReadingState", { ...newer, progress: 0.9, updatedAt: new Date(Date.now() - 4000).toISOString() }, "token-33333");
+  assert.equal((await call("getReadingShelf", {}, "token-33333")).entries[0].progress, 0.42);
+  assert.deepEqual((await call("getReadingShelf", {}, "token-11111")).entries, []);
+
+  const cleared = await call("clearReadingShelf", {}, "token-33333");
+  assert.equal(cleared.generation, 1);
+  assert.deepEqual((await call("getReadingShelf", {}, "token-33333")).entries, []);
+  const stale = await call("syncReadingShelf", { generation: 0, entries: [newer] }, "token-33333");
+  assert.equal(stale.stale, true);
+  assert.equal(stale.generation, 1);
+  assert.deepEqual(stale.entries, []);
+  assert.deepEqual((await call("getReadingShelf", {}, "token-33333")).entries, []);
+  assert.deepEqual((await call("getMyRatingWorkIds", {}, "token-33333")).workIds, [workId]);
+  assert.deepEqual((await call("getMyRatingWorkIds", {}, "token-11111")).workIds, []);
+  await assert.rejects(call("getMyRatingWorkIds"), /请登录/);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM reading_states WHERE qq = '33333'").get().n, 0);
+});
+
+test("回复通知只投递给主评论作者，删除或关闭后不再展示", async (t) => {
+  const { call, db } = await fixture(t);
+  db.prepare("INSERT INTO tokens (token, qq, role, exp) VALUES (?, ?, 'member', ?)")
+    .run("token-33333", "33333", Date.now() + 60000);
+  const root = await call("addComment", { workId: workIds[0], body: "主评论" }, "token-33333");
+  const reply = await call("addComment", {
+    workId: workIds[0],
+    replyToId: root.comment.id,
+    body: "管理员回复",
+    anonymous: true,
+  }, "token-11111");
+  await call("addComment", {
+    workId: workIds[0],
+    replyToId: root.comment.id,
+    body: "主评论作者的补充回复",
+  }, "token-33333");
+  let inbox = await call("getCommentNotifications", {}, "token-33333");
+  assert.equal(inbox.notifications.length, 1);
+  assert.equal(inbox.notifications[0].workId, workIds[0]);
+  assert.equal(inbox.notifications[0].rootId, root.comment.id);
+  assert.equal(inbox.notifications[0].commentId, reply.comment.id);
+  assert.equal(inbox.notifications[0].preview, "管理员回复");
+  assert.equal("actorQq" in inbox.notifications[0], false);
+  assert.equal((await call("getCommentNotifications", {}, "token-11111")).notifications.length, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM comment_notifications").get().n, 1);
+
+  await call("dismissCommentNotification", { id: inbox.notifications[0].id }, "token-33333");
+  assert.deepEqual((await call("getCommentNotifications", {}, "token-33333")).notifications, []);
+  await call("deleteComment", { id: reply.comment.id }, "token-11111");
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM comments WHERE id = ?").get(reply.comment.id).n, 0);
+});
+
+test("作品反馈与评论举报支持去重、账号隔离、管理员处理和操作记录", async (t) => {
+  const { call, db } = await fixture(t);
+  db.prepare("INSERT INTO tokens (token, qq, role, exp) VALUES (?, ?, 'member', ?)")
+    .run("token-33333", "33333", Date.now() + 60000);
+  const root = await call("addComment", { workId: workIds[0], body: "需要核查的评论" }, "token-33333");
+  const feedbackRequest = {
+    workId: workIds[0],
+    category: "content",
+    description: "第三段存在错字，请核对。",
+    selectedText: "一个词语",
+    sourcePath: "/2026/001/",
+    requestId: "feedback-retry-001",
+  };
+  const feedback = await call("submitWorkFeedback", feedbackRequest, "token-33333");
+  assert.deepEqual(await call("submitWorkFeedback", feedbackRequest, "token-33333"), feedback);
+  assert.deepEqual(
+    await call("submitWorkFeedback", { ...feedbackRequest, requestId: "feedback-retry-002" }, "token-33333"),
+    feedback,
+  );
+  assert.equal((await call("getMyWorkFeedback", {}, "token-33333")).feedback.length, 1);
+  assert.deepEqual((await call("getMyWorkFeedback", {}, "token-11111")).feedback, []);
+  await assert.rejects(call("getAdminFeedback", {}, "token-33333"), /管理员权限/);
+  await assert.rejects(call("submitWorkFeedback", { ...feedbackRequest, workId: "2026/missing" }, "token-33333"), /不在公开目录/);
+
+  const reportRequest = {
+    commentId: root.comment.id,
+    reason: "other",
+    description: "请管理员核查上下文。",
+    requestId: "report-retry-001",
+  };
+  await assert.rejects(call("submitCommentReport", reportRequest), /登录调查员/);
+  const submittedReport = await call("submitCommentReport", reportRequest, "token-11111");
+  assert.deepEqual(await call("submitCommentReport", reportRequest, "token-11111"), submittedReport);
+  assert.deepEqual(
+    await call("submitCommentReport", { ...reportRequest, requestId: "report-retry-002" }, "token-11111"),
+    submittedReport,
+  );
+
+  await call("updateWorkFeedback", {
+    id: feedback.feedback.id,
+    status: "resolved",
+    adminNote: "已登记，等待正文编辑流程核对。",
+  }, "token-11111");
+  await call("updateCommentReport", {
+    id: submittedReport.report.id,
+    status: "no_action",
+    adminNote: "上下文核查后无需处理。",
+  }, "token-11111");
+  const queue = await call("getAdminFeedback", {}, "token-11111");
+  assert.equal(queue.workFeedback[0].status, "resolved");
+  assert.equal(queue.reports[0].status, "no_action");
+  const history = await call("getFeedbackHistory", { targetType: "work", targetId: feedback.feedback.id }, "token-11111");
+  assert.equal(history.actions.length, 1);
+  assert.equal(history.actions[0].status, "resolved");
+  await assert.rejects(call("getFeedbackHistory", { targetType: "work", targetId: feedback.feedback.id }, "token-33333"), /管理员权限/);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM feedback_actions").get().n, 2);
+});

@@ -170,8 +170,102 @@ db.exec(`
     judge INTEGER NOT NULL DEFAULT 0,
     body TEXT NOT NULL,
     t TEXT NOT NULL,
+    requestId TEXT,
     deletedAt TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS comment_requests (
+    qq TEXT NOT NULL,
+    requestId TEXT NOT NULL,
+    workId TEXT NOT NULL,
+    rootId TEXT,
+    anonymous INTEGER NOT NULL,
+    body TEXT NOT NULL,
+    commentJson TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    PRIMARY KEY (qq, requestId)
+  );
+
+  CREATE TABLE IF NOT EXISTS reading_states (
+    qq TEXT NOT NULL,
+    workId TEXT NOT NULL,
+    progress REAL NOT NULL DEFAULT 0,
+    positionJson TEXT,
+    markedReadAt TEXT,
+    laterAt TEXT,
+    updatedAt TEXT NOT NULL,
+    PRIMARY KEY (qq, workId)
+  );
+  CREATE INDEX IF NOT EXISTS idx_reading_states_qq_updated
+    ON reading_states(qq, updatedAt DESC);
+
+  CREATE TABLE IF NOT EXISTS reading_shelf_meta (
+    qq TEXT PRIMARY KEY,
+    generation INTEGER NOT NULL DEFAULT 0,
+    updatedAt TEXT NOT NULL DEFAULT ''
+  );
+
+  CREATE TABLE IF NOT EXISTS comment_notifications (
+    id TEXT PRIMARY KEY,
+    recipientQq TEXT NOT NULL,
+    workId TEXT NOT NULL,
+    rootId TEXT NOT NULL,
+    commentId TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    readAt TEXT,
+    dismissedAt TEXT,
+    UNIQUE(recipientQq, commentId)
+  );
+  CREATE INDEX IF NOT EXISTS idx_comment_notifications_inbox
+    ON comment_notifications(recipientQq, dismissedAt, createdAt DESC);
+
+  CREATE TABLE IF NOT EXISTS work_feedback (
+    id TEXT PRIMARY KEY,
+    reporterQq TEXT NOT NULL,
+    workId TEXT NOT NULL,
+    category TEXT NOT NULL,
+    selectedText TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL,
+    sourcePath TEXT NOT NULL,
+    requestId TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    adminNote TEXT NOT NULL DEFAULT '',
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT NOT NULL,
+    handledBy TEXT,
+    UNIQUE(reporterQq, requestId)
+  );
+  CREATE INDEX IF NOT EXISTS idx_work_feedback_queue
+    ON work_feedback(status, createdAt DESC);
+
+  CREATE TABLE IF NOT EXISTS comment_reports (
+    id TEXT PRIMARY KEY,
+    reporterQq TEXT NOT NULL,
+    commentId TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    requestId TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    adminNote TEXT NOT NULL DEFAULT '',
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT NOT NULL,
+    handledBy TEXT,
+    UNIQUE(reporterQq, requestId)
+  );
+  CREATE INDEX IF NOT EXISTS idx_comment_reports_queue
+    ON comment_reports(status, createdAt DESC);
+
+  CREATE TABLE IF NOT EXISTS feedback_actions (
+    id TEXT PRIMARY KEY,
+    targetType TEXT NOT NULL,
+    targetId TEXT NOT NULL,
+    adminQq TEXT NOT NULL,
+    status TEXT NOT NULL,
+    adminNote TEXT NOT NULL DEFAULT '',
+    createdAt TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_feedback_actions_target
+    ON feedback_actions(targetType, targetId, createdAt DESC);
 
   CREATE TABLE IF NOT EXISTS stars (
     id TEXT PRIMARY KEY,
@@ -299,6 +393,18 @@ db.exec(`
     db.exec("ALTER TABLE comments ADD COLUMN deletedAt TEXT");
   }
   db.exec("CREATE INDEX IF NOT EXISTS idx_comments_work_root_time ON comments(workId, rootId, t, id)");
+})();
+
+(function migrateCommentRequestIds() {
+  const cols = db.prepare("PRAGMA table_info(comments)").all();
+  if (!cols.some((col) => col.name === "requestId")) {
+    db.exec("ALTER TABLE comments ADD COLUMN requestId TEXT");
+  }
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_comments_qq_request_id
+      ON comments(qq, requestId)
+      WHERE requestId IS NOT NULL AND requestId <> ''
+  `);
 })();
 
 // 密码加密（使用标准 scrypt）
@@ -522,6 +628,100 @@ function manifestCatalogueIds(editionSlug) {
       ),
     ),
   );
+}
+
+function safeReadingStateInput(input) {
+  const workId = String(input && input.workId || "").trim();
+  const separator = workId.indexOf("/");
+  if (separator < 1 || workId.length > 260) throw new Error("作品编号无效。");
+  const editionSlug = workId.slice(0, separator);
+  if (!manifestCatalogueIds(editionSlug).includes(workId)) throw new Error("作品不在公开目录中。");
+  const progressValue = Number(input.progress);
+  const progress = Number.isFinite(progressValue) ? Math.max(0, Math.min(1, progressValue)) : 0;
+  let positionJson = null;
+  if (input.position && typeof input.position === "object") {
+    const version = String(input.position.version || "").slice(0, 80);
+    const anchor = String(input.position.anchor || "").slice(0, 160);
+    const offset = Number(input.position.offset);
+    if (version && anchor && Number.isFinite(offset)) {
+      positionJson = JSON.stringify({
+        version,
+        anchor,
+        offset: Math.max(0, Math.min(1, offset)),
+      });
+      if (positionJson.length > 512) throw new Error("阅读位置过长。");
+    }
+  }
+  function optionalTime(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const time = Date.parse(raw);
+    if (!Number.isFinite(time) || time > Date.now() + 5 * 60 * 1000) return "";
+    return new Date(time).toISOString();
+  }
+  const clientTime = Date.parse(String(input.updatedAt || ""));
+  const updatedAt = Number.isFinite(clientTime) && clientTime <= Date.now() + 5 * 60 * 1000
+    ? new Date(clientTime).toISOString()
+    : new Date().toISOString();
+  return {
+    workId,
+    progress,
+    positionJson,
+    markedReadAt: optionalTime(input.markedReadAt),
+    laterAt: optionalTime(input.laterAt),
+    updatedAt,
+  };
+}
+
+function serializedReadingState(row) {
+  if (!row) return null;
+  let position = null;
+  try { position = row.positionJson ? JSON.parse(row.positionJson) : null; } catch (e) { /* ignore invalid legacy value */ }
+  return {
+    workId: row.workId,
+    progress: Math.max(0, Math.min(1, Number(row.progress) || 0)),
+    position,
+    markedReadAt: row.markedReadAt || "",
+    laterAt: row.laterAt || "",
+    updatedAt: row.updatedAt || "",
+  };
+}
+
+function readingShelfGeneration(qq) {
+  const row = db.prepare("SELECT generation FROM reading_shelf_meta WHERE qq = ?").get(qq);
+  return Math.max(0, Number(row && row.generation) || 0);
+}
+
+function readingShelfEntries(qq) {
+  return db.prepare(
+    "SELECT workId, progress, positionJson, markedReadAt, laterAt, updatedAt " +
+    "FROM reading_states WHERE qq = ? ORDER BY updatedAt DESC LIMIT 2000",
+  ).all(qq).map(serializedReadingState);
+}
+
+function upsertReadingState(qq, input) {
+  const next = safeReadingStateInput(input);
+  db.prepare(
+    "INSERT INTO reading_states (qq, workId, progress, positionJson, markedReadAt, laterAt, updatedAt) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?) " +
+    "ON CONFLICT(qq, workId) DO UPDATE SET " +
+    "progress = excluded.progress, positionJson = excluded.positionJson, " +
+    "markedReadAt = excluded.markedReadAt, laterAt = excluded.laterAt, updatedAt = excluded.updatedAt " +
+    "WHERE excluded.updatedAt > reading_states.updatedAt",
+  ).run(qq, next.workId, next.progress, next.positionJson, next.markedReadAt, next.laterAt, next.updatedAt);
+  const row = db.prepare(
+    "SELECT workId, progress, positionJson, markedReadAt, laterAt, updatedAt " +
+    "FROM reading_states WHERE qq = ? AND workId = ?",
+  ).get(qq, next.workId);
+  return serializedReadingState(row);
+}
+
+function createReplyNotification(recipientQq, actorQq, workId, rootId, commentId, createdAt) {
+  if (!recipientQq || recipientQq === actorQq) return;
+  db.prepare(
+    "INSERT OR IGNORE INTO comment_notifications " +
+    "(id, recipientQq, workId, rootId, commentId, createdAt) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(crypto.randomUUID(), recipientQq, workId, rootId, commentId, createdAt);
 }
 
 function ratingAchievementDefinitions(total) {
@@ -1925,6 +2125,62 @@ async function handle(action, payload, auth, ctx) {
       };
     }
 
+    case "getReadingShelf": {
+      if (!user) throw new Error("请登录后查看已同步的阅读记录。");
+      return {
+        generation: readingShelfGeneration(user.qq),
+        entries: readingShelfEntries(user.qq),
+      };
+    }
+
+    case "saveReadingState": {
+      if (!user) throw new Error("请登录后同步阅读记录。");
+      const generation = readingShelfGeneration(user.qq);
+      if (Number(payload.generation || 0) !== generation) {
+        return { entry: null, generation, stale: true };
+      }
+      return { entry: upsertReadingState(user.qq, payload), generation };
+    }
+
+    case "syncReadingShelf": {
+      if (!user) throw new Error("请登录后同步阅读记录。");
+      const entries = Array.isArray(payload.entries) ? payload.entries : [];
+      if (entries.length > 2000) throw new Error("阅读记录过多，请分批同步。");
+      const generation = readingShelfGeneration(user.qq);
+      if (Number(payload.generation || 0) !== generation) {
+        return { generation, entries: readingShelfEntries(user.qq), stale: true };
+      }
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        entries.forEach((entry) => upsertReadingState(user.qq, entry));
+        const rows = readingShelfEntries(user.qq);
+        db.exec("COMMIT");
+        return { generation, entries: rows };
+      } catch (err) {
+        try { db.exec("ROLLBACK"); } catch (rollbackError) { /* transaction already ended */ }
+        throw err;
+      }
+    }
+
+    case "clearReadingShelf": {
+      if (!user) throw new Error("请登录后清除已同步的阅读记录。");
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const generation = readingShelfGeneration(user.qq) + 1;
+        const now = new Date().toISOString();
+        db.prepare(
+          "INSERT INTO reading_shelf_meta (qq, generation, updatedAt) VALUES (?, ?, ?) " +
+          "ON CONFLICT(qq) DO UPDATE SET generation = excluded.generation, updatedAt = excluded.updatedAt",
+        ).run(user.qq, generation, now);
+        db.prepare("DELETE FROM reading_states WHERE qq = ?").run(user.qq);
+        db.exec("COMMIT");
+        return { generation, entries: [] };
+      } catch (err) {
+        try { db.exec("ROLLBACK"); } catch (rollbackError) { /* transaction already ended */ }
+        throw err;
+      }
+    }
+
     case "getStars": {
       if (!user) return { stars: [] };
       const editionSlug = String(payload.editionSlug || "");
@@ -1939,6 +2195,18 @@ async function handle(action, payload, auth, ctx) {
       const editionSlug = String(payload.editionSlug || "");
       const progress = ratingProgressForUser(user.qq, editionSlug);
       return ratingProgressWithAchievements(user.qq, progress);
+    }
+
+    case "getMyRatingWorkIds": {
+      if (!user || (session.role !== "member" && session.role !== "admin")) {
+        throw new Error("请登录后查看自己的评议记录。");
+      }
+      const rows = db.prepare("SELECT DISTINCT workId FROM ratings WHERE qq = ?").all(user.qq);
+      const allowed = new Set(rows.map((row) => row.workId).filter((workId) => {
+        const editionSlug = String(workId || "").split("/")[0];
+        return manifestCatalogueIds(editionSlug).includes(workId);
+      }));
+      return { workIds: Array.from(allowed) };
     }
 
     case "claimRatingAchievement": {
@@ -2081,24 +2349,43 @@ async function handle(action, payload, auth, ctx) {
       if (!body) throw new Error("评论不能为空");
       if (!workId) throw new Error("缺少作品编号");
       const replyToId = String(payload.replyToId || "").trim();
+      const anonymous = !!payload.anonymous;
+      const requestId = String(payload.requestId || "").trim();
+      if (requestId && (requestId.length < 8 || requestId.length > 100 || !/^[A-Za-z0-9._:-]+$/.test(requestId))) {
+        throw new Error("评论请求编号无效。");
+      }
       let rootId = null;
+      let replyRecipientQq = "";
+      if (requestId) {
+        const previous = db.prepare(`
+          SELECT workId, rootId, anonymous, body, commentJson
+          FROM comment_requests WHERE qq = ? AND requestId = ?
+        `).get(user.qq, requestId);
+        if (previous) {
+          if (
+            previous.workId !== workId ||
+            (previous.rootId || "") !== replyToId ||
+            !!previous.anonymous !== anonymous ||
+            previous.body !== body
+          ) {
+            throw new Error("评论请求编号已用于其他内容，请重新载入草稿后再试。");
+          }
+          return { comment: JSON.parse(previous.commentJson) };
+        }
+      }
       if (replyToId) {
-        const target = db.prepare("SELECT id, workId, rootId, deletedAt FROM comments WHERE id = ?").get(replyToId);
+        const target = db.prepare("SELECT id, workId, rootId, deletedAt, qq FROM comments WHERE id = ?").get(replyToId);
         if (!target || target.workId !== workId) throw new Error("回复目标不存在或不属于这篇作品。");
         if (target.rootId) throw new Error("只能回复初始评论，不能回复其他回复。");
         if (target.deletedAt) throw new Error("该评论已删除，无法回复。");
         rootId = target.id;
+        replyRecipientQq = target.qq;
       }
-      const anonymous = !!payload.anonymous;
       const editionSlug = workId.split("/")[0];
       const st = editionState(settings, editionSlug);
       const judge = !rootId && session.role === "admin" && st.phase === "统计" && !anonymous;
       const id = crypto.randomBytes(12).toString("hex");
       const t = new Date().toISOString();
-      db.prepare(`
-        INSERT INTO comments (id, workId, rootId, qq, name, anonymous, judge, body, t)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, workId, rootId, user.qq, user.nickname, anonymous ? 1 : 0, judge ? 1 : 0, body, t);
       const row = {
         id,
         workId,
@@ -2110,7 +2397,254 @@ async function handle(action, payload, auth, ctx) {
         body,
         t,
       };
+      if (requestId) {
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          const previous = db.prepare(`
+            SELECT workId, rootId, anonymous, body, commentJson
+            FROM comment_requests WHERE qq = ? AND requestId = ?
+          `).get(user.qq, requestId);
+          if (previous) {
+            db.exec("COMMIT");
+            if (
+              previous.workId !== workId ||
+              (previous.rootId || "") !== replyToId ||
+              !!previous.anonymous !== anonymous ||
+              previous.body !== body
+            ) {
+              throw new Error("评论请求编号已用于其他内容，请重新载入草稿后再试。");
+            }
+            return { comment: JSON.parse(previous.commentJson) };
+          }
+          db.prepare(`
+            INSERT INTO comments (id, workId, rootId, qq, name, anonymous, judge, body, t, requestId)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(id, workId, rootId, user.qq, user.nickname, anonymous ? 1 : 0, judge ? 1 : 0, body, t, requestId);
+          createReplyNotification(replyRecipientQq, user.qq, workId, rootId, id, t);
+          db.prepare(`
+            INSERT INTO comment_requests (qq, requestId, workId, rootId, anonymous, body, commentJson, createdAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(user.qq, requestId, workId, rootId, anonymous ? 1 : 0, body, JSON.stringify(row), t);
+          db.exec("COMMIT");
+        } catch (err) {
+          try { db.exec("ROLLBACK"); } catch (rollbackError) { /* transaction already ended */ }
+          throw err;
+        }
+      } else {
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          db.prepare(
+            "INSERT INTO comments (id, workId, rootId, qq, name, anonymous, judge, body, t) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          ).run(id, workId, rootId, user.qq, user.nickname, anonymous ? 1 : 0, judge ? 1 : 0, body, t);
+          createReplyNotification(replyRecipientQq, user.qq, workId, rootId, id, t);
+          db.exec("COMMIT");
+        } catch (err) {
+          try { db.exec("ROLLBACK"); } catch (rollbackError) { /* transaction already ended */ }
+          throw err;
+        }
+      }
       return { comment: row };
+    }
+
+    case "getCommentNotifications": {
+      if (!user) throw new Error("登录后可查看回复提醒。");
+      const rows = db.prepare(
+        "SELECT n.id, n.workId, n.rootId, n.commentId, n.createdAt, n.readAt, c.body AS replyBody " +
+        "FROM comment_notifications n " +
+        "JOIN comments c ON c.id = n.commentId AND c.deletedAt IS NULL " +
+        "JOIN comments root ON root.id = n.rootId AND root.deletedAt IS NULL " +
+        "WHERE n.recipientQq = ? AND n.dismissedAt IS NULL " +
+        "ORDER BY n.createdAt DESC LIMIT 100",
+      ).all(user.qq);
+      return {
+        notifications: rows.map((row) => ({
+          id: row.id,
+          workId: row.workId,
+          rootId: row.rootId,
+          commentId: row.commentId,
+          createdAt: row.createdAt,
+          readAt: row.readAt || "",
+          preview: String(row.replyBody || "").replace(/\s+/g, " ").slice(0, 120),
+        })),
+      };
+    }
+
+    case "markCommentNotificationRead": {
+      if (!user) throw new Error("登录后可更新回复提醒。");
+      const id = String(payload.id || "").trim();
+      db.prepare("UPDATE comment_notifications SET readAt = COALESCE(readAt, ?) WHERE id = ? AND recipientQq = ? AND dismissedAt IS NULL")
+        .run(new Date().toISOString(), id, user.qq);
+      return { updated: true };
+    }
+
+    case "markAllCommentNotificationsRead": {
+      if (!user) throw new Error("登录后可更新回复提醒。");
+      const result = db.prepare("UPDATE comment_notifications SET readAt = COALESCE(readAt, ?) WHERE recipientQq = ? AND dismissedAt IS NULL")
+        .run(new Date().toISOString(), user.qq);
+      return { updated: Number(result.changes) || 0 };
+    }
+
+    case "dismissCommentNotification": {
+      if (!user) throw new Error("登录后可更新回复提醒。");
+      const id = String(payload.id || "").trim();
+      db.prepare("UPDATE comment_notifications SET dismissedAt = COALESCE(dismissedAt, ?) WHERE id = ? AND recipientQq = ?")
+        .run(new Date().toISOString(), id, user.qq);
+      return { dismissed: true };
+    }
+
+    case "submitWorkFeedback": {
+      if (!user || (session.role !== "member" && session.role !== "admin")) {
+        throw new Error("登录调查员账号后可提交作品反馈。");
+      }
+      const workId = String(payload.workId || "").trim();
+      const editionSlug = workId.split("/")[0];
+      if (!manifestCatalogueIds(editionSlug).includes(workId)) throw new Error("作品不在公开目录中。");
+      const category = String(payload.category || "");
+      if (!["content", "attachment", "other"].includes(category)) throw new Error("请选择反馈类型。");
+      const description = String(payload.description || "").trim().slice(0, 2000);
+      if (description.length < 3) throw new Error("请再补充一些问题说明。");
+      const selectedText = String(payload.selectedText || "").trim().slice(0, 500);
+      const requestId = String(payload.requestId || "").trim();
+      if (!/^[A-Za-z0-9._:-]{8,100}$/.test(requestId)) throw new Error("反馈请求编号无效。");
+      const previous = db.prepare("SELECT * FROM work_feedback WHERE reporterQq = ? AND requestId = ?")
+        .get(user.qq, requestId);
+      if (previous) {
+        if (previous.workId !== workId || previous.category !== category ||
+            previous.description !== description || previous.selectedText !== selectedText) {
+          throw new Error("反馈请求编号已用于其他内容。");
+        }
+        return { feedback: { id: previous.id, status: previous.status, createdAt: previous.createdAt } };
+      }
+      const recentDuplicate = db.prepare(
+        "SELECT id, status, createdAt FROM work_feedback WHERE reporterQq = ? AND workId = ? " +
+        "AND category = ? AND selectedText = ? AND description = ? AND createdAt >= ? " +
+        "ORDER BY createdAt DESC LIMIT 1",
+      ).get(user.qq, workId, category, selectedText, description, new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+      if (recentDuplicate) {
+        return { feedback: { id: recentDuplicate.id, status: recentDuplicate.status, createdAt: recentDuplicate.createdAt } };
+      }
+      let sourcePath = String(payload.sourcePath || "").trim().slice(0, 400);
+      if (!sourcePath.startsWith("/") || sourcePath.startsWith("//")) sourcePath = "/";
+      const now = new Date().toISOString();
+      const id = crypto.randomUUID();
+      db.prepare(
+        "INSERT INTO work_feedback " +
+        "(id, reporterQq, workId, category, selectedText, description, sourcePath, requestId, createdAt, updatedAt) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(id, user.qq, workId, category, selectedText, description, sourcePath, requestId, now, now);
+      return { feedback: { id, status: "pending", createdAt: now } };
+    }
+
+    case "submitCommentReport": {
+      if (!user || (session.role !== "member" && session.role !== "admin")) {
+        throw new Error("登录调查员账号后可举报评论。");
+      }
+      const commentId = String(payload.commentId || "").trim();
+      const comment = db.prepare("SELECT id, qq, deletedAt FROM comments WHERE id = ?").get(commentId);
+      if (!comment || comment.deletedAt) throw new Error("这条评论已不存在。");
+      if (comment.qq === user.qq) throw new Error("不能举报自己的评论。");
+      const reason = String(payload.reason || "");
+      if (!["spam", "harassment", "privacy", "other"].includes(reason)) throw new Error("请选择举报原因。");
+      const description = String(payload.description || "").trim().slice(0, 500);
+      const requestId = String(payload.requestId || "").trim();
+      if (!/^[A-Za-z0-9._:-]{8,100}$/.test(requestId)) throw new Error("举报请求编号无效。");
+      const previous = db.prepare("SELECT * FROM comment_reports WHERE reporterQq = ? AND requestId = ?")
+        .get(user.qq, requestId);
+      if (previous) {
+        if (previous.commentId !== commentId || previous.reason !== reason || previous.description !== description) {
+          throw new Error("举报请求编号已用于其他内容。");
+        }
+        return { report: { id: previous.id, status: previous.status, createdAt: previous.createdAt } };
+      }
+      const recentDuplicate = db.prepare(
+        "SELECT id, status, createdAt FROM comment_reports WHERE reporterQq = ? AND commentId = ? " +
+        "AND reason = ? AND description = ? AND createdAt >= ? ORDER BY createdAt DESC LIMIT 1",
+      ).get(user.qq, commentId, reason, description, new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+      if (recentDuplicate) {
+        return { report: { id: recentDuplicate.id, status: recentDuplicate.status, createdAt: recentDuplicate.createdAt } };
+      }
+      const now = new Date().toISOString();
+      const id = crypto.randomUUID();
+      db.prepare(
+        "INSERT INTO comment_reports " +
+        "(id, reporterQq, commentId, reason, description, requestId, createdAt, updatedAt) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(id, user.qq, commentId, reason, description, requestId, now, now);
+      return { report: { id, status: "pending", createdAt: now } };
+    }
+
+    case "getMyWorkFeedback": {
+      if (!user) throw new Error("登录后可查看你提交的反馈。");
+      const rows = db.prepare(
+        "SELECT id, workId, category, status, createdAt, updatedAt " +
+        "FROM work_feedback WHERE reporterQq = ? ORDER BY createdAt DESC LIMIT 100",
+      ).all(user.qq);
+      return { feedback: rows };
+    }
+
+    case "getAdminFeedback": {
+      if (!user || session.role !== "admin") throw new Error("需要管理员权限。");
+      const kind = String(payload.kind || "all");
+      const workFeedback = kind === "reports" ? [] : db.prepare(
+        "SELECT f.id, f.workId, f.category, f.selectedText, f.description, f.sourcePath, f.status, " +
+        "f.adminNote, f.createdAt, f.updatedAt, f.reporterQq, u.nickname AS reporterName " +
+        "FROM work_feedback f LEFT JOIN users u ON u.qq = f.reporterQq " +
+        "ORDER BY CASE f.status WHEN 'pending' THEN 0 ELSE 1 END, f.createdAt DESC LIMIT 200",
+      ).all();
+      const reports = kind === "work" ? [] : db.prepare(
+        "SELECT r.id, r.commentId, r.reason, r.description, r.status, r.adminNote, r.createdAt, " +
+        "r.reporterQq, u.nickname AS reporterName, c.workId, c.rootId, c.body AS commentBody, c.deletedAt " +
+        "FROM comment_reports r LEFT JOIN users u ON u.qq = r.reporterQq " +
+        "LEFT JOIN comments c ON c.id = r.commentId " +
+        "ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END, r.createdAt DESC LIMIT 200",
+      ).all();
+      return { workFeedback, reports };
+    }
+
+    case "getFeedbackHistory": {
+      if (!user || session.role !== "admin") throw new Error("需要管理员权限。");
+      const targetType = payload.targetType === "report" ? "report" : "work";
+      const targetId = String(payload.targetId || "").trim();
+      const table = targetType === "report" ? "comment_reports" : "work_feedback";
+      if (!db.prepare("SELECT id FROM " + table + " WHERE id = ?").get(targetId)) {
+        throw new Error("处理记录不存在。");
+      }
+      return {
+        actions: db.prepare(
+          "SELECT a.id, a.adminQq, u.nickname AS adminName, a.status, a.adminNote, a.createdAt " +
+          "FROM feedback_actions a LEFT JOIN users u ON u.qq = a.adminQq " +
+          "WHERE a.targetType = ? AND a.targetId = ? ORDER BY a.createdAt DESC LIMIT 100",
+        ).all(targetType, targetId),
+      };
+    }
+
+    case "updateWorkFeedback":
+    case "updateCommentReport": {
+      if (!user || session.role !== "admin") throw new Error("需要管理员权限。");
+      const isReport = action === "updateCommentReport";
+      const table = isReport ? "comment_reports" : "work_feedback";
+      const id = String(payload.id || "").trim();
+      const status = String(payload.status || "");
+      if (!["pending", "resolved", "no_action"].includes(status)) throw new Error("处理状态无效。");
+      const adminNote = String(payload.adminNote || "").trim().slice(0, 1000);
+      const exists = db.prepare("SELECT id FROM " + table + " WHERE id = ?").get(id);
+      if (!exists) throw new Error("处理记录不存在。");
+      const now = new Date().toISOString();
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.prepare("UPDATE " + table + " SET status = ?, adminNote = ?, updatedAt = ?, handledBy = ? WHERE id = ?")
+          .run(status, adminNote, now, user.qq, id);
+        db.prepare(
+          "INSERT INTO feedback_actions (id, targetType, targetId, adminQq, status, adminNote, createdAt) " +
+          "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ).run(crypto.randomUUID(), isReport ? "report" : "work", id, user.qq, status, adminNote, now);
+        db.exec("COMMIT");
+      } catch (err) {
+        try { db.exec("ROLLBACK"); } catch (rollbackError) { /* transaction already ended */ }
+        throw err;
+      }
+      return { updated: true, status, updatedAt: now };
     }
 
     case "deleteComment": {

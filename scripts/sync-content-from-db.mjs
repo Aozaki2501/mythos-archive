@@ -9,13 +9,13 @@
 //   2) node scripts/sync-content-from-db.mjs ../wc-dump.json          # 写入源文件
 //      node scripts/sync-content-from-db.mjs ../wc-dump.json --check  # 只校验，不改文件
 //
-// 原理：数据库里存的就是构建产物（HTML）。要把 HTML 还原成「能被 marked 重新渲染出同一份
-// HTML」的源文件，标题是唯一麻烦点：
+// 原理：数据库里存的就是构建产物（HTML）。优先还原成逐字节一致的源文件；若只差块级元素
+// 之间的排版空白，则视为等价，避免把相同正文当成线上编辑冲突。标题是唯一麻烦点：
 //   - markdown 标题会走 build-html.mjs 的 heading renderer，生成 id 并进右侧索引；
 //     三级及以下标题只有带 {toc} 才进索引。
 //   - 而 HTML 块里的 <h2> 会被原样透传，既不生成 id 也不进索引。
-// 所以这里按「候选方案 + 逐篇渲染比对」来做：只有重新渲染与数据库正文逐字节一致才采用，
-// 否则降级到更保守的方案，最后把无法还原的篇目报出来。
+// 所以这里按「候选方案 + 逐篇渲染比对」来做：优先逐字节匹配；现有源码若仅有块级排版
+// 空白差异则保留不动；确有正文差异时，只有候选方案可还原为等价 HTML 才允许回灌。
 import fs from "node:fs";
 import path from "node:path";
 import { marked } from "marked";
@@ -60,17 +60,32 @@ function renderBody(body) {
       .replace(/\s*\{\s*toc\s*\}\s*$/i, "")
       .replace(/<[^>]+>/g, "")
       .trim();
-    const id = slugify(plain, used);
+    const sectionTitle = plain
+      .replace(/&(?:emsp|ensp|nbsp);/gi, " ")
+      .replace(/&#(?:8194|8195|160);/g, " ")
+      .replace(/&#x(?:2002|2003|00a0);/gi, " ")
+      .trim();
+    const id = slugify(sectionTitle, used);
     let title = this.parser.parseInline(token.tokens);
     title = title.replace(/\s*\{\s*toc\s*\}\s*$/i, "").trim();
     if (token.depth === 2 || (token.depth >= 3 && flagged)) {
-      sections.push({ id, title: plain, level: token.depth });
+      sections.push({ id, title: sectionTitle, level: token.depth });
     }
     return `<h${token.depth} id="${id}">${title}</h${token.depth}>\n`;
   };
 
   const html = marked.parse(body, { async: false, renderer });
   return { html, sections };
+}
+
+function sameRenderedHtml(left, right) {
+  const blockTags = "p|h[1-6]|div|ul|ol|li|blockquote|table|thead|tbody|tr|td|th|section|article|figure|pre";
+  const separator = new RegExp(
+    `(<\\/(?:${blockTags})>)[\\t \\r\\n]+(?=<(?:${blockTags})(?:\\s|>))`,
+    "gi",
+  );
+  const normalize = (html) => String(html).replace(separator, "$1").replace(/[\t \r\n]+$/, "");
+  return normalize(left) === normalize(right);
 }
 
 /* ---------- HTML → 源文件正文 ---------- */
@@ -188,7 +203,7 @@ for (const row of rows) {
     if (no !== debugNo) continue;
     console.log(`[debug] ${row.workId} bodyLen=${row.body.length}`);
   }
-  const { source, exact } = htmlToSource(row.body);
+  const { source } = htmlToSource(row.body);
 
   if (!fs.existsSync(file)) {
     problems.push(`${row.workId}: 找不到源文件 ${file}`);
@@ -200,16 +215,23 @@ for (const row of rows) {
     problems.push(`${row.workId}: 源文件缺 frontmatter`);
     continue;
   }
-  const next = fm[0] + source;
-  if (!exact) problems.push(`${row.workId}: 无法还原成完全一致的 HTML`);
+  const currentBody = raw.slice(fm[0].length);
+  const currentMatches = sameRenderedHtml(renderBody(currentBody).html, row.body);
+  const candidateMatches = sameRenderedHtml(renderBody(source).html, row.body);
 
-  if (checkOnly) {
-    if (raw !== next) problems.push(`${row.workId}: 源文件与数据库不一致`);
-    else ok += 1;
+  if (currentMatches) {
+    ok += 1;
     continue;
   }
-  if (raw === next) {
-    ok += 1;
+  if (!candidateMatches) {
+    problems.push(`${row.workId}: 无法还原成与数据库等价的 HTML`);
+    continue;
+  }
+
+  const next = fm[0] + source;
+
+  if (checkOnly) {
+    problems.push(`${row.workId}: 源文件与数据库不一致`);
     continue;
   }
   fs.writeFileSync(file, next, "utf8");
