@@ -9957,7 +9957,6 @@
         cursor = range[1];
       });
       if (cursor < text.length) node.appendChild(document.createTextNode(text.slice(cursor)));
-      if (!merged.length) node.appendChild(document.createTextNode(text));
     }
 
     function paintDiscovery(rows, loading) {
@@ -10094,7 +10093,7 @@
         if (result.edition.slug !== currentEdition) {
           currentEdition = result.edition.slug;
           resultsNode.appendChild(
-            el("div", "global-search-group-title", result.edition.year + " · " + result.edition.shortName),
+            el("div", "global-search-group-title", result.edition.shortName),
           );
         }
         var link = el("a", "global-search-item");
