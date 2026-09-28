@@ -151,6 +151,13 @@ db.exec(`
     UNIQUE(workId, qq)
   );
 
+  CREATE TABLE IF NOT EXISTS rating_exclusions (
+    qq TEXT PRIMARY KEY
+  );
+
+  CREATE VIEW IF NOT EXISTS counted_ratings AS
+    SELECT * FROM ratings WHERE qq NOT IN (SELECT qq FROM rating_exclusions);
+
   CREATE TABLE IF NOT EXISTS rating_achievements (
     id TEXT PRIMARY KEY,
     qq TEXT NOT NULL,
@@ -1054,7 +1061,7 @@ function recentSpotlightIds(editionSlug, date, cooldownDays) {
 function spotlightCandidateRows(config, editionSlug, date) {
   return config.catalogueWorkIds.map((workId) => {
     const ratingRow = db
-      .prepare("SELECT COUNT(*) AS count FROM ratings WHERE workId = ?")
+      .prepare("SELECT COUNT(*) AS count FROM counted_ratings WHERE workId = ?")
       .get(workId);
     const lastRow = db
       .prepare(
@@ -1390,13 +1397,13 @@ function reportWorkStats(editionSlug) {
   const prefix = editionSlug + "/%";
   return db.prepare(`
     WITH works AS (
-      SELECT workId FROM ratings WHERE workId LIKE ?
+      SELECT workId FROM counted_ratings WHERE workId LIKE ?
       UNION SELECT workId FROM comments WHERE workId LIKE ?
     ), ratings_by_work AS (
       SELECT workId, COUNT(*) AS ratingCount, AVG(chuanlu) AS chuanluAvg,
         AVG(dangan) AS danganAvg, AVG(overall) AS overallAvg,
         AVG((chuanlu + dangan + overall) / 3.0) AS totalAvg, MAX(t) AS lastRatingAt
-      FROM ratings WHERE workId LIKE ? GROUP BY workId
+      FROM counted_ratings WHERE workId LIKE ? GROUP BY workId
     ), comments_by_work AS (
       SELECT workId, COUNT(*) AS commentCount, MAX(COALESCE(editedAt, t)) AS lastCommentAt
       FROM comments WHERE workId LIKE ? GROUP BY workId
@@ -1421,7 +1428,7 @@ function searchRecommendations() {
   // 互动按时间分档加权：最近 7 天记满权重，8-30 天打折，更早的只保留少量权重。
   const rows = db.prepare(`
     WITH works AS (
-      SELECT workId FROM ratings UNION SELECT workId FROM comments
+      SELECT workId FROM counted_ratings UNION SELECT workId FROM comments
     ), rating_activity AS (
       SELECT workId, COUNT(*) AS ratingCount,
         SUM(CASE
@@ -1429,7 +1436,7 @@ function searchRecommendations() {
           WHEN datetime(t) >= datetime('now', '-30 days') THEN 0.6
           ELSE 0.3
         END) AS ratingWeight
-      FROM ratings GROUP BY workId
+      FROM counted_ratings GROUP BY workId
     ), comment_activity AS (
       SELECT workId, COUNT(*) AS commentCount,
         SUM(CASE
@@ -1510,7 +1517,7 @@ function editionScoreDistributions(editionSlug) {
   );
   const rows = db.prepare(`
     SELECT workId, COUNT(*) AS ratingCount, ${selections.join(", ")}
-    FROM ratings
+    FROM counted_ratings
     WHERE workId LIKE ?
     GROUP BY workId
   `).all(editionSlug + "/%");
@@ -1639,7 +1646,7 @@ function reportSummary() {
   return {
     users: Number(db.prepare("SELECT COUNT(*) AS c FROM users").get().c),
     enabledUsers: Number(db.prepare("SELECT COUNT(*) AS c FROM users WHERE enabled = 1").get().c),
-    ratings: Number(db.prepare("SELECT COUNT(*) AS c FROM ratings").get().c),
+    ratings: Number(db.prepare("SELECT COUNT(*) AS c FROM counted_ratings").get().c),
     comments: Number(db.prepare("SELECT COUNT(*) AS c FROM comments").get().c),
   };
 }
@@ -2096,9 +2103,11 @@ async function handle(action, payload, auth, ctx) {
 
       // 评分获取：严格保护隐私
       const rawRatings = db.prepare("SELECT id, workId, qq, chuanlu, dangan, overall, t FROM ratings WHERE workId = ?").all(workId);
+      const excludedQQs = new Set(db.prepare("SELECT qq FROM rating_exclusions").all().map((row) => row.qq));
+      const countedRatings = rawRatings.filter((rating) => !excludedQQs.has(rating.qq));
       let ratings = [];
       if (session && session.role === "admin") {
-        ratings = rawRatings;
+        ratings = countedRatings;
       } else if (st.phase === "征文" || st.phase === "评分") {
         // 评分阶段：普通用户只能看到自己的评分
         if (user) {
@@ -2108,7 +2117,9 @@ async function handle(action, payload, auth, ctx) {
         }
       } else if (st.phase === "统计" || st.phase === "公示") {
         // 公示阶段：允许均分统计，但不暴露他人 QQ -> 分数的对应
-        ratings = rawRatings.map((r, idx) => {
+        ratings = countedRatings.filter((r) => !user || r.qq !== user.qq);
+        if (user) ratings = ratings.concat(rawRatings.filter((r) => r.qq === user.qq));
+        ratings = ratings.map((r, idx) => {
           if (user && r.qq === user.qq) return r;
           return {
             ...r,
@@ -2879,14 +2890,14 @@ async function handle(action, payload, auth, ctx) {
         enabled: !!row.enabled,
         createdAt: row.createdAt,
       }));
-      const ratings = db.prepare("SELECT workId, qq, chuanlu, dangan, overall, t FROM ratings ORDER BY t DESC").all();
+      const ratings = db.prepare("SELECT workId, qq, chuanlu, dangan, overall, t FROM counted_ratings ORDER BY t DESC").all();
       const comments = db.prepare("SELECT workId, qq, name, anonymous, judge, body, t, editedAt FROM comments ORDER BY t DESC").all().map((row) => ({
         ...row,
         anonymous: !!row.anonymous,
         judge: !!row.judge,
       }));
       const editionSlugs = db.prepare(`
-        SELECT DISTINCT substr(workId, 1, instr(workId, '/') - 1) AS slug FROM ratings
+        SELECT DISTINCT substr(workId, 1, instr(workId, '/') - 1) AS slug FROM counted_ratings
         UNION SELECT DISTINCT substr(workId, 1, instr(workId, '/') - 1) AS slug FROM comments
       `).all().map((row) => row.slug).filter(Boolean);
       const workStats = editionSlugs.flatMap((slug) => reportWorkStats(slug));

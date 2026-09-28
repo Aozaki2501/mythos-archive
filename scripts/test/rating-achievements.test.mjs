@@ -205,6 +205,35 @@ try {
   });
   assert.equal(claimedFullVolume.body.data.claimed, true);
 
+  const exclusionDb = new DatabaseSync(dbPath);
+  exclusionDb.prepare("INSERT INTO rating_exclusions (qq) VALUES (?)").run(memberQQ);
+  assert.equal(exclusionDb.prepare("SELECT COUNT(*) AS n FROM ratings WHERE qq = ?").get(memberQQ).n, 53);
+  assert.equal(exclusionDb.prepare("SELECT COUNT(*) AS n FROM counted_ratings WHERE qq = ?").get(memberQQ).n, 0);
+  const excludedUpdate = await callApi("submitRating", {
+    workId: workIds[0], chuanlu: 3, dangan: 3, overall: 3,
+  });
+  assert.equal(excludedUpdate.response.ok, true, excludedUpdate.body.error);
+  assert.equal(excludedUpdate.body.data.ratedCountAfter, 53);
+  assert.equal(exclusionDb.prepare("SELECT COUNT(*) AS n FROM counted_ratings WHERE workId = ?").get(workIds[0]).n, 1);
+  const selfBundle = await callApi("getWorkBundle", { workId: workIds[0] });
+  assert.equal(selfBundle.body.data.ratings.length, 1);
+  assert.equal(selfBundle.body.data.ratings[0].overall, 3);
+  settings.editions[2026].phase = "统计";
+  exclusionDb.prepare("UPDATE settings SET value = ? WHERE key = 'main'").run(JSON.stringify(settings));
+  const publicResponse = await fetch(baseUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "getWorkBundle", payload: { workId: workIds[0] } }),
+  });
+  const publicBundle = await publicResponse.json();
+  assert.equal(publicResponse.ok, true, publicBundle.error);
+  assert.equal(publicBundle.data.ratings.length, 1);
+  assert.equal(publicBundle.data.ratings[0].overall, 3);
+  const excludedSelfBundle = await callApi("getWorkBundle", { workId: workIds[0] });
+  assert.equal(excludedSelfBundle.body.data.ratings.length, 2);
+  assert.ok(excludedSelfBundle.body.data.ratings.some((rating) => rating.qq === memberQQ));
+  exclusionDb.close();
+
   console.log("rating achievement API tests passed");
 } catch (error) {
   if (serverOutput) process.stderr.write(serverOutput);
