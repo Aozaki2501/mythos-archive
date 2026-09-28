@@ -27,7 +27,7 @@ const WITCH_EXPRESSION_ASSETS = [
   "witch-expression-surprised.webp",
 ];
 const BRAND_URL = "./archive-brand.webp?v=20260921-brand";
-const STATIC_VERSION = "20260928-search-dedupe-v41";
+const STATIC_VERSION = "20260928-statistics-ui-v44";
 const BUILD_DATE = STATIC_VERSION.slice(0, 8).replace(/^(\d{4})(\d{2})(\d{2})$/, "$1.$2.$3");
 const PUBLIC_ORIGIN = String(process.env.ARCHIVE_PUBLIC_ORIGIN || "").replace(/\/+$/, "");
 const built = spawnSync(process.execPath, ["scripts/build-html.mjs"], {
@@ -345,9 +345,6 @@ ${DREAM_GATE_MARKUP}
     <button type="button" data-nav="spotlight">今日聚光</button>
     <button type="button" data-nav="catalogue">本届目录</button>
     <button type="button" data-nav="archive">历届档案</button>
-    <button type="button" data-nav="guide">评议说明</button>
-    <button type="button" data-nav="reading">我的阅读</button>
-    <button type="button" data-nav="notifications" hidden>站内通知 <span class="notification-count" hidden></span></button>
     <button type="button" data-nav="results" hidden>投票公示</button>
   </nav>
   <div class="site-search" id="site-search">
@@ -360,9 +357,10 @@ ${DREAM_GATE_MARKUP}
   </div>
   <button type="button" class="site-account-link" id="site-account-link">调查员入口</button>
 <div class="top-tools" id="top-tools">
-  <button type="button" class="top-more" id="top-more" aria-controls="top-menu" aria-expanded="false" aria-label="更多操作">⋯</button>
+  <button type="button" class="top-more" id="top-more" aria-controls="top-menu" aria-expanded="false" aria-label="更多入口" title="更多入口">更多</button>
   <div class="top-menu" id="top-menu">
     <button type="button" class="top-results" id="top-results" hidden>投票公示</button>
+    <button type="button" class="top-guide" id="top-guide">评议说明</button>
     <button type="button" class="top-reading" id="top-reading">我的阅读</button>
     <button type="button" class="top-notifications" id="top-notifications" hidden>站内通知 <span class="notification-count" id="notification-count" hidden></span></button>
     <div class="account-hud" id="account-hud" hidden></div>

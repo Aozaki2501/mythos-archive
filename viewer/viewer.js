@@ -60,7 +60,13 @@
     { key: "overall", label: "综合" },
   ];
 
-  var PIE_COLORS = ["#c9c3b8", "#a89878", "#6a5a44", "#4a4034", "#2a2825"];
+  var PIE_COLORS = [
+    "var(--rating-1)",
+    "var(--rating-2)",
+    "var(--rating-3)",
+    "var(--rating-4)",
+    "var(--rating-5)",
+  ];
 
   /* ---------- 工具 ---------- */
 
@@ -155,7 +161,7 @@
       clear(searchIcon);
       searchIcon.appendChild(svgUse("i-search", "icon"));
     }
-    setIconLabel(refs.topMore, "i-more", "");
+    setIconLabel(refs.topMore, "i-more", "更多");
     setIconLabel(refs.hudPrev, "i-prev", "");
     setIconLabel(refs.hudNext, "i-next", "");
     setIconLabel(refs.mobileBarPrev, "i-prev", "上一篇");
@@ -2924,6 +2930,7 @@
     topMore: document.getElementById("top-more"),
     topMenu: document.getElementById("top-menu"),
     topResults: document.getElementById("top-results"),
+    topGuide: document.getElementById("top-guide"),
     topReading: document.getElementById("top-reading"),
     topNotifications: document.getElementById("top-notifications"),
     notificationCount: document.getElementById("notification-count"),
@@ -3246,7 +3253,7 @@
 
   /* ---------- 右上工具条 ---------- */
 
-  // 窄屏把公示、账号、主题收进一个「⋯」下拉菜单，宽屏直接平铺可用入口
+  // 主要导航之外的阅读、通知、说明与账号操作收进「更多」菜单。
   function setTopMenuOpen(open) {
     if (!refs.topTools || !refs.topMore) return;
     refs.topTools.classList.toggle("is-menu-open", !!open);
@@ -7011,7 +7018,7 @@
     }
 
     var phase = phaseOf(state.editionSlug);
-    var showPublicAverages = isAdmin() || phase !== "评分";
+    var showPublicAverages = isAdmin() || phase === "公示";
     var summary = el("div", "score-summary");
     var stats = averages(id);
     // 投票人数只给管理员看；其他人没评过时显示"尚未评分"
@@ -8232,7 +8239,23 @@
     resultsHeadMain.appendChild(el("p", "results-edition", edition.shortName));
     resultsHead.appendChild(resultsHeadMain);
     var resultsHeadAside = el("div", "results-head-aside");
-    resultsHeadAside.appendChild(renderPhaseChip(edition.slug));
+    var resultsPhaseChip = renderPhaseChip(edition.slug);
+    resultsPhaseChip.classList.add("results-phase-chip");
+    var resultsDeadlineMeta = resultsPhaseChip.querySelector(".phase-chip-meta");
+    if (resultsDeadlineMeta) {
+      var resultsDeadline = phaseDeadlineOf(edition.slug, phaseOf(edition.slug));
+      var resultsDeadlineDate = new Date(resultsDeadline);
+      var resultsDeadlineText = formatTime(resultsDeadline);
+      var resultsDeadlineYear = String(resultsDeadlineDate.getFullYear()) + ".";
+      if (
+        Number(edition.year) === resultsDeadlineDate.getFullYear() &&
+        resultsDeadlineText.indexOf(resultsDeadlineYear) === 0
+      ) {
+        resultsDeadlineText = resultsDeadlineText.slice(resultsDeadlineYear.length);
+      }
+      resultsDeadlineMeta.textContent = "截止 " + resultsDeadlineText;
+    }
+    resultsHeadAside.appendChild(resultsPhaseChip);
     var resultsMark = el(
       "div",
       "results-status-mark" + (officialResults ? " is-official" : ""),
@@ -8335,7 +8358,7 @@
       });
       return detail;
     }
-    if (!isAdmin() && USE_CLOUD) {
+    if (USE_CLOUD) {
       if (!insight || !insight.rankingsAvailable) {
         sheet.appendChild(el("p", "intro-text", "本届排名将在统计阶段或结果公示阶段开放。"));
       } else {
@@ -8401,6 +8424,9 @@
         });
         if (publicDistributionRows.childElementCount) {
           sheet.appendChild(el("h2", "panel-title results-distribution-title", "作品评分分布"));
+          sheet.appendChild(
+            el("p", "results-distribution-note", "颜色对应 1–5 分；各色条段的宽度表示该分值所占比例。"),
+          );
           sheet.appendChild(publicDistributionRows);
         }
       }
@@ -8509,6 +8535,9 @@
     });
     if (distributionList.childElementCount) {
       sheet.appendChild(el("h2", "panel-title results-distribution-title", "作品评分分布"));
+      sheet.appendChild(
+        el("p", "results-distribution-note", "颜色对应 1–5 分；各色条段的宽度表示该分值所占比例。"),
+      );
       sheet.appendChild(distributionList);
     }
 
@@ -8615,10 +8644,13 @@
         bins.map(function (count, index) { return index + 1 + "分 " + count + "票"; }).join("，"),
     );
     bins.forEach(function (count, index) {
+      if (!(Number(count) > 0)) return;
       var segment = el("span", "distribution-segment");
-      segment.style.width = total ? (count / total) * 100 + "%" : "0%";
+      segment.style.flexGrow = String(Math.max(0, Number(count) || 0));
+      segment.style.flexBasis = "0";
       segment.style.backgroundColor = PIE_COLORS[index];
       segment.setAttribute("aria-hidden", "true");
+      segment.title = (index + 1) + " 分：" + count + " 票";
       bar.appendChild(segment);
     });
     block.appendChild(bar);
@@ -10184,7 +10216,7 @@
             return;
           }
           if (nav === "results") {
-            navigateToPublicResults();
+            navigateToResults();
             return;
           }
           if (nav === "guide") {
@@ -10235,7 +10267,13 @@
       });
     }
     if (refs.topResults) {
-      refs.topResults.addEventListener("click", navigateToPublicResults);
+      refs.topResults.addEventListener("click", navigateToResults);
+    }
+    if (refs.topGuide) {
+      refs.topGuide.addEventListener("click", function () {
+        setTopMenuOpen(false);
+        openGuideModal();
+      });
     }
     if (refs.topReading) {
       refs.topReading.addEventListener("click", function () {
@@ -10263,10 +10301,20 @@
   }
 
   function renderSiteBar() {
-    var publicEdition = getPublicResultsEdition();
+    var resultsEdition = getResultsEdition();
+    var resultsLabel =
+      resultsEdition && isPublicPhase(resultsEdition.slug)
+        ? "结果公示"
+        : "投票统计";
     var resultsEntry = refs.siteNav && refs.siteNav.querySelector('[data-nav="results"]');
-    if (resultsEntry) resultsEntry.hidden = !publicEdition;
-    if (refs.topResults) refs.topResults.hidden = !publicEdition;
+    if (resultsEntry) {
+      resultsEntry.hidden = !resultsEdition;
+      if (resultsEdition) resultsEntry.textContent = resultsLabel;
+    }
+    if (refs.topResults) {
+      refs.topResults.hidden = !resultsEdition;
+      if (resultsEdition) refs.topResults.textContent = resultsLabel;
+    }
     if (refs.topNotifications) refs.topNotifications.hidden = !canInteract();
     var notificationsEntry = refs.siteNav && refs.siteNav.querySelector('[data-nav="notifications"]');
     if (notificationsEntry) notificationsEntry.hidden = !canInteract();
@@ -10283,15 +10331,18 @@
     refs.siteAccountLink.title = isVisitor() ? "访客账号" : "打开账号管理";
   }
 
-  function getPublicResultsEdition() {
+  function getResultsEdition() {
     var edition = editions.filter(function (item) {
       return item.works && item.works.length;
     })[0] || editions[0];
-    return edition && isPublicPhase(edition.slug) ? edition : null;
+    return edition &&
+      (isPublicPhase(edition.slug) || (isAdmin() && isJudgePhase(edition.slug)))
+      ? edition
+      : null;
   }
 
-  function navigateToPublicResults() {
-    var edition = getPublicResultsEdition();
+  function navigateToResults() {
+    var edition = getResultsEdition();
     if (!edition) return;
     location.hash = "#/" + edition.slug + "/__results";
   }
@@ -10933,6 +10984,19 @@
     heroState.appendChild(phaseLine);
     var timeline = renderPhaseTimeline(edition.slug);
     if (timeline) heroState.appendChild(timeline);
+    if (isJudgePhase(edition.slug) && !isAdmin()) {
+      var resultsNotice = el("aside", "home-results-notice");
+      resultsNotice.setAttribute("role", "status");
+      resultsNotice.appendChild(el("span", "home-results-notice-label", "结果核验中"));
+      resultsNotice.appendChild(
+        el(
+          "p",
+          null,
+          "评分已结束，管理员正在核对统计结果。确认并进入公示阶段后，排名与分布数据将在此开放。",
+        ),
+      );
+      heroState.appendChild(resultsNotice);
+    }
     var actions = el("div", "home-phase-actions");
     var shareVolume = el("button", "btn-ghost home-volume-share");
     shareVolume.type = "button";
@@ -12117,6 +12181,10 @@
     refs.editionSelect.value = edition.slug;
 
     if (workSlug === "__results") {
+      if (!isAdmin() && !isPublicPhase(edition.slug) && !historicalResultsOf(edition)) {
+        location.hash = "#/";
+        return;
+      }
       state.workSlug = "";
       if (state.view !== "results") applySidebarCollapsed(true);
       state.view = "results";

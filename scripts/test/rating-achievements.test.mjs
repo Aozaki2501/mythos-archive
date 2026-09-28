@@ -227,11 +227,20 @@ try {
   });
   const publicBundle = await publicResponse.json();
   assert.equal(publicResponse.ok, true, publicBundle.error);
-  assert.equal(publicBundle.data.ratings.length, 1);
-  assert.equal(publicBundle.data.ratings[0].overall, 3);
+  assert.equal(publicBundle.data.ratings.length, 0);
   const excludedSelfBundle = await callApi("getWorkBundle", { workId: workIds[0] });
-  assert.equal(excludedSelfBundle.body.data.ratings.length, 2);
+  assert.equal(excludedSelfBundle.body.data.ratings.length, 1);
   assert.ok(excludedSelfBundle.body.data.ratings.some((rating) => rating.qq === memberQQ));
+  const publicInsightsResponse = await fetch(baseUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "getEditionInsights", payload: { editionSlug: "2026" } }),
+  });
+  const publicInsights = await publicInsightsResponse.json();
+  assert.equal(publicInsightsResponse.ok, true, publicInsights.error);
+  assert.equal(publicInsights.data.rankingsAvailable, false);
+  assert.deepEqual(publicInsights.data.leaderboard, []);
+  assert.equal(publicInsights.data.distributions, null);
   exclusionDb.close();
 
   console.log("rating achievement API tests passed");

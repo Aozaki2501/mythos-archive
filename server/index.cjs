@@ -1719,7 +1719,9 @@ async function handle(action, payload, auth, ctx) {
       const st = editionState(settings, editionSlug);
       const publication = publicationOf(editionSlug);
       const workStats = reportWorkStats(editionSlug);
-      const rankingsAvailable = !!publication || st.phase === "统计";
+      const rankingsAvailable = Boolean(
+        publication || (st.phase === "统计" && session && session.role === "admin"),
+      );
       const heat = workStats.map((row) => ({
         workId: row.workId,
         commentCount: row.commentCount,
@@ -2115,8 +2117,11 @@ async function handle(action, payload, auth, ctx) {
         } else {
           ratings = [];
         }
-      } else if (st.phase === "统计" || st.phase === "公示") {
-        // 公示阶段：允许均分统计，但不暴露他人 QQ -> 分数的对应
+      } else if (st.phase === "统计") {
+        // 统计复核期间，普通账号只取回自己的评分，不能拼出实时排行榜。
+        ratings = user ? rawRatings.filter((r) => r.qq === user.qq) : [];
+      } else if (st.phase === "公示") {
+        // 公示阶段允许核对均分，但不暴露他人 QQ -> 分数的对应。
         ratings = countedRatings.filter((r) => !user || r.qq !== user.qq);
         if (user) ratings = ratings.concat(rawRatings.filter((r) => r.qq === user.qq));
         ratings = ratings.map((r, idx) => {

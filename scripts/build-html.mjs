@@ -400,15 +400,17 @@ ${css}
     <button type="button" data-nav="spotlight">今日聚光</button>
     <button type="button" data-nav="catalogue">本届目录</button>
     <button type="button" data-nav="archive">历届档案</button>
-    <button type="button" data-nav="guide">评议说明</button>
     <button type="button" data-nav="search">全馆搜索</button>
     <button type="button" data-nav="results" hidden>投票公示</button>
   </nav>
   <button type="button" class="site-account-link" id="site-account-link">调查员入口</button>
 <div class="top-tools" id="top-tools">
-  <button type="button" class="top-more" id="top-more" aria-controls="top-menu" aria-expanded="false" aria-label="更多操作">⋯</button>
+  <button type="button" class="top-more" id="top-more" aria-controls="top-menu" aria-expanded="false" aria-label="更多入口" title="更多入口">更多</button>
   <div class="top-menu" id="top-menu">
     <button type="button" class="top-results" id="top-results" hidden>投票公示</button>
+    <button type="button" class="top-guide" id="top-guide">评议说明</button>
+    <button type="button" class="top-reading" id="top-reading">我的阅读</button>
+    <button type="button" class="top-notifications" id="top-notifications" hidden>站内通知 <span class="notification-count" id="notification-count" hidden></span></button>
     <div class="account-hud" id="account-hud" hidden></div>
     <button type="button" class="theme-toggle" id="theme-toggle" aria-label="切换到黑夜模式" title="切换到黑夜模式">☾ 黑夜</button>
   </div>
