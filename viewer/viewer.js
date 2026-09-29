@@ -168,7 +168,9 @@
     setIconLabel(refs.mobileBarNext, "i-next", "下一篇");
   }
 
-  function createInkSeal(label, variant) {
+  // 白文方印：四个字按竖排右起读（右列 chars[0..1]，左列 chars[2..3]），默认「档案封存」
+  function createInkSeal(label, variant, chars) {
+    var c = Array.from(chars || "档案封存");
     var seal = document.createElementNS(SVG_NS, "svg");
     seal.setAttribute("class", "seal " + (variant || ""));
     seal.setAttribute("viewBox", "0 0 100 100");
@@ -176,7 +178,68 @@
     seal.setAttribute("height", "34");
     seal.setAttribute("role", "img");
     seal.setAttribute("aria-label", label);
-    seal.innerHTML = '<g filter="url(#ink)"><rect x="5" y="5" width="90" height="90" rx="5" fill="currentColor"/><g fill="var(--panel)" text-anchor="middle" font-size="35" font-weight="800"><text x="71" y="44">档</text><text x="71" y="84">案</text><text x="29" y="44">封</text><text x="29" y="84">存</text></g></g>';
+    seal.innerHTML = '<g filter="url(#ink)"><rect x="5" y="5" width="90" height="90" rx="5" fill="currentColor"/><g fill="var(--panel)" text-anchor="middle" font-size="35" font-weight="800"><text x="71" y="44">' + c[0] + '</text><text x="71" y="84">' + c[1] + '</text><text x="29" y="44">' + c[2] + '</text><text x="29" y="84">' + c[3] + "</text></g></g>";
+    return seal;
+  }
+
+  function escapeSvgText(text) {
+    return String(text).replace(/[&<>"]/g, function (ch) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch];
+    });
+  }
+
+  // 朱文竖印：上方小字（默认「授奖」），下面奖项名逐字竖排，高度随字数变化（原型「获奖」竖印）
+  function createAwardSeal(name, variant, kicker) {
+    kicker = kicker || "授奖";
+    var chars = Array.from(String(name || "")).slice(0, 8);
+    var height = 44 + chars.length * 28 + 8;
+    var seal = document.createElementNS(SVG_NS, "svg");
+    seal.setAttribute("class", "seal " + (variant || ""));
+    seal.setAttribute("viewBox", "0 0 64 " + height);
+    seal.setAttribute("width", "48");
+    seal.setAttribute("height", String(Math.round(height * 0.75)));
+    seal.setAttribute("role", "img");
+    seal.setAttribute("aria-label", kicker + " · " + name);
+    seal.innerHTML = '<g filter="url(#ink)"><rect x="3" y="3" width="58" height="' + (height - 6) + '" rx="3" fill="none" stroke="currentColor" stroke-width="3.5"/>' +
+      '<rect x="8.5" y="8.5" width="47" height="' + (height - 17) + '" rx="1.5" fill="none" stroke="currentColor" stroke-width="1"/>' +
+      '<text x="32" y="27" text-anchor="middle" font-size="11" letter-spacing="4" font-weight="700" fill="currentColor">' + escapeSvgText(kicker) + "</text>" +
+      '<line x1="14" y1="35" x2="50" y2="35" stroke="currentColor" stroke-width="1"/>' +
+      '<g text-anchor="middle" font-size="24" font-weight="800" fill="currentColor">' +
+      chars.map(function (ch, index) { return '<text x="32" y="' + (61 + index * 28) + '">' + escapeSvgText(ch) + "</text>"; }).join("") +
+      "</g></g>";
+    return seal;
+  }
+
+  // 朱文字签：单框一行小字，用作奖项名标签（名次行、授奖卡）；高度由 CSS 决定，宽度随字数
+  function createTagSeal(text, variant) {
+    var chars = Array.from(String(text || ""));
+    var width = 18 + chars.length * 25;
+    var seal = document.createElementNS(SVG_NS, "svg");
+    seal.setAttribute("class", "seal " + (variant || ""));
+    seal.setAttribute("viewBox", "0 0 " + width + " 40");
+    seal.setAttribute("width", String(Math.round(width * 0.45)));
+    seal.setAttribute("height", "18");
+    seal.setAttribute("role", "img");
+    seal.setAttribute("aria-label", text);
+    seal.innerHTML = '<g filter="url(#ink)"><rect x="2" y="2" width="' + (width - 4) + '" height="36" rx="2" fill="none" stroke="currentColor" stroke-width="2.6"/>' +
+      '<text x="' + width / 2 + '" y="28.5" text-anchor="middle" font-size="23" letter-spacing="2" font-weight="700" fill="currentColor">' + escapeSvgText(text) + "</text></g>";
+    return seal;
+  }
+
+  // 朱文横印：双框，一行字（如「查无此档」）
+  function createBoxSeal(text, variant) {
+    var chars = Array.from(String(text || ""));
+    var width = 28 + chars.length * 30;
+    var seal = document.createElementNS(SVG_NS, "svg");
+    seal.setAttribute("class", "seal " + (variant || ""));
+    seal.setAttribute("viewBox", "0 0 " + width + " 56");
+    seal.setAttribute("width", String(Math.round(width * 0.8)));
+    seal.setAttribute("height", "45");
+    seal.setAttribute("role", "img");
+    seal.setAttribute("aria-label", text);
+    seal.innerHTML = '<g filter="url(#ink)"><rect x="3" y="3" width="' + (width - 6) + '" height="50" rx="3" fill="none" stroke="currentColor" stroke-width="3.5"/>' +
+      '<rect x="8.5" y="8.5" width="' + (width - 17) + '" height="39" rx="1.5" fill="none" stroke="currentColor" stroke-width="1"/>' +
+      '<text x="' + width / 2 + '" y="37.5" text-anchor="middle" font-size="25" letter-spacing="5" font-weight="800" fill="currentColor">' + escapeSvgText(text) + "</text></g>";
     return seal;
   }
 
@@ -8114,7 +8177,7 @@
     return panel;
   }
 
-  function appendResultsRanking(parent, table, title, wrapper) {
+  function appendResultsRanking(parent, table, title) {
     var labels = Array.from(table.querySelectorAll("thead th")).map(function (cell) { return cell.textContent; });
     Array.from(table.querySelectorAll("tbody tr")).forEach(function (row) {
       Array.from(row.cells).forEach(function (cell, index) { cell.dataset.label = labels[index] || ""; });
@@ -8125,18 +8188,6 @@
       heading.appendChild(el("h2", "panel-title", title));
       heading.appendChild(el("span", "results-section-caption", "按综合均分排列"));
       parent.appendChild(heading);
-      // 历届名次行的两项维度只给条、不给数字，所以补一条图例说明颜色含义
-      var dimLabels = Array.from(table.querySelectorAll("thead th")).map(function (cell) { return cell.textContent; }).slice(3, 5);
-      if (table.classList.contains("historical-rank-table") && dimLabels.length === 2 && dimLabels[0] && dimLabels[0] !== "综合") {
-        var legend = el("div", "rank-dim-legend");
-        dimLabels.forEach(function (label, index) {
-          var item = el("span", "rank-dim-legend-item");
-          item.appendChild(el("span", "rank-dim-legend-swatch " + (index === 0 ? "is-dim-first" : "is-dim-second")));
-          item.appendChild(el("span", null, label));
-          legend.appendChild(item);
-        });
-        parent.appendChild(legend);
-      }
     } else {
       parent.appendChild(el("h2", "panel-title results-rank-title", title));
     }
@@ -8149,11 +8200,155 @@
         table.classList.remove("rank-table-collapsed");
         showAll.remove();
       });
-      parent.appendChild(wrapper || table);
+      parent.appendChild(table);
       parent.appendChild(showAll);
     } else {
-      parent.appendChild(wrapper || table);
+      parent.appendChild(table);
     }
+  }
+
+  // 公示页「全部名次」：历届与本届共用。rows 为 { rank, title, href, award, author, dims: [数值|null], overall }，
+  // dimLabels 与 dims 一一对应（历届两项、本届三项）。电脑上两栏按列排（左 1–10、右 11–20），手机单栏。
+  function renderResultsRankList(parent, rows, dimLabels, caption) {
+    var heading = el("div", "results-section-heading");
+    heading.appendChild(el("span", "results-section-number", "02"));
+    heading.appendChild(el("h2", "panel-title", "全部名次"));
+    heading.appendChild(el("span", "results-section-caption", caption));
+    parent.appendChild(heading);
+    if (dimLabels.length) {
+      var legend = el("div", "rank-dim-legend");
+      dimLabels.forEach(function (label) {
+        var item = el("span", "rank-dim-legend-item");
+        item.appendChild(el("span", "rank-dim-legend-swatch"));
+        item.appendChild(el("span", null, label));
+        legend.appendChild(item);
+      });
+      parent.appendChild(legend);
+    }
+    var items = [];
+    rows.forEach(function (row) {
+      var li = el("li", "rank-item");
+      // 有详情（评分分布 / 评委评语）的行做成可展开的 details，详情在首次展开时才生成
+      var details = row.detail ? el("details", "rank-item-details") : null;
+      var item = el(details ? "summary" : "div", "rank-row");
+      if (details) {
+        details.appendChild(item);
+        details.addEventListener("toggle", function () {
+          if (!details.open || details.dataset.built) return;
+          details.dataset.built = "1";
+          var body = el("div", "rank-row-detail");
+          var content = row.detail();
+          if (content) body.appendChild(content);
+          details.appendChild(body);
+        });
+        li.appendChild(details);
+      } else {
+        li.appendChild(item);
+      }
+      item.appendChild(el("span", "rank-row-no", String(row.rank).padStart(2, "0")));
+      var main = el("div", "rank-row-main");
+      var title = el("div", "rank-row-title");
+      if (row.href) {
+        var link = el("a", "rank-row-link", row.title);
+        link.href = row.href;
+        title.appendChild(link);
+      } else {
+        title.appendChild(el("span", "rank-row-link", row.title));
+      }
+      if (row.award) title.appendChild(createTagSeal(row.award, "rank-list-award"));
+      main.appendChild(title);
+      main.appendChild(el("div", "rank-row-author", row.author));
+      item.appendChild(main);
+      var dims = el("div", "rank-row-dims");
+      dimLabels.forEach(function (label, index) {
+        var value = row.dims[index];
+        var dim = el("span", "rank-row-dim");
+        dim.appendChild(el("span", "rank-row-dim-label", label));
+        dim.appendChild(el("span", "rank-row-dim-value", value == null ? "—" : value.toFixed(2)));
+        if (value != null) dim.style.setProperty("--score-pct", Math.max(0, Math.min(100, value * 20)) + "%");
+        dims.appendChild(dim);
+      });
+      item.appendChild(dims);
+      var score = el("span", "rank-row-score", row.overall == null ? "—" : row.overall.toFixed(2));
+      score.setAttribute("aria-label", "综合 " + score.textContent);
+      item.appendChild(score);
+      items.push(li);
+    });
+    // 两栏各是一个独立的 ol：左栏放前一半、右栏放后一半（收起时只排前 20 名），
+    // 展开某行只加长所在那一栏。手机上两栏上下相接，顺序仍是 1…n。
+    var columns = el("div", "results-rank-columns");
+    var left = el("ol", "results-rank-list");
+    var right = el("ol", "results-rank-list");
+    columns.appendChild(left);
+    columns.appendChild(right);
+    function layout(visible) {
+      var half = Math.ceil(visible / 2);
+      items.forEach(function (li, index) {
+        li.hidden = index >= visible;
+        (index < half ? left : right).appendChild(li);
+      });
+      right.start = half + 1;
+    }
+    layout(Math.min(rows.length, 20));
+    parent.appendChild(columns);
+    if (rows.length > 20) {
+      var showAll = el("button", "btn-ghost results-show-all", "展开其余 " + (rows.length - 20) + " 份档案");
+      showAll.type = "button";
+      showAll.addEventListener("click", function () {
+        layout(rows.length);
+        showAll.remove();
+      });
+      parent.appendChild(showAll);
+    }
+  }
+
+  // 刊头下的一行数字（原型：70 份档案 · 7 项奖 · 77 条评语 · 33 位作者解封），数量为 0 的项不写
+  function renderResultsFigures(parent, pairs) {
+    var line = el("p", "results-figures");
+    pairs.filter(function (pair) { return pair[0] > 0; }).forEach(function (pair) {
+      var item = el("span", "results-figure");
+      item.appendChild(el("strong", null, String(pair[0])));
+      item.appendChild(document.createTextNode(" " + pair[1]));
+      line.appendChild(item);
+    });
+    parent.appendChild(line);
+  }
+
+  // 本届名次行展开后的内容：各维度 1–5 分分布 + 评分人数，获奖作品再附评委评语
+  function renderRankRowDistribution(distributions, ratingCount, award) {
+    var box = el("div", "rank-row-distribution");
+    if (distributions) {
+      box.appendChild(el("p", "rank-row-detail-note", ratingCount + " 位调查员评分 · 色段宽度为各分值所占比例"));
+      DIMENSIONS.forEach(function (dim) {
+        var bins = distributions[dim.key];
+        if (Array.isArray(bins) && bins.length === 5) box.appendChild(renderDistributionBlock(dim.label, bins));
+      });
+    }
+    if (award && award.review) {
+      var review = el("div", "historical-review");
+      review.appendChild(el("h4", "historical-review-by", award.name + " · 评委评语"));
+      var body = el("div", "historical-review-body");
+      appendHistoricalReviewText(body, award.review);
+      review.appendChild(body);
+      box.appendChild(review);
+    }
+    return box;
+  }
+
+  function averageFromBins(bins) {
+    if (!Array.isArray(bins) || bins.length !== 5) return null;
+    var count = 0;
+    var sum = 0;
+    bins.forEach(function (n, index) {
+      count += Number(n) || 0;
+      sum += (Number(n) || 0) * (index + 1);
+    });
+    return count ? sum / count : null;
+  }
+
+  // 本届各维度均分：公开接口只给综合分，但各维度 1–5 分票数在 distributions 里，直接折算
+  function dimensionAveragesOf(distributions) {
+    return DIMENSIONS.map(function (dim) { return averageFromBins(distributions && distributions[dim.key]); });
   }
 
   function appendResultsDistributions(parent, list) {
@@ -8181,7 +8376,7 @@
       cardHead.appendChild(el("span", null, "幻梦境档案馆 · 授奖卡"));
       cardHead.appendChild(el("span", null, "No. " + edition.year + " / " + String(entry.work ? entry.work.no : index + 1).padStart(3, "0")));
       main.appendChild(cardHead);
-      main.appendChild(el("p", "award-card-name", entry.award));
+      main.appendChild(createTagSeal(entry.award, "award-card-name"));
       var title = el("h3", "award-card-title");
       if (entry.work) {
         var link = el("a", null, entry.title);
@@ -8222,7 +8417,7 @@
       card.appendChild(main);
       if (featured) {
         var aside = el("div", "award-card-aside");
-        aside.appendChild(el("span", "award-card-stamp", "授奖\n档案"));
+        aside.appendChild(createInkSeal("授奖档案", "seal-tilt-r award-card-stamp", "授奖档案"));
         if (entry.rank) {
           aside.appendChild(el("strong", "award-card-rank", String(entry.rank)));
           aside.appendChild(el("span", "award-card-rank-label", "最终名次"));
@@ -8235,17 +8430,26 @@
       }
       gallery.appendChild(card);
     });
+    // 首张大卡之外的小卡：2 张或 4 张时排两列，免得三列里空一格
+    var rest = entries.length - 1;
+    gallery.style.setProperty("--award-cols", String(rest <= 1 ? 1 : rest === 2 || rest === 4 ? 2 : 3));
     parent.appendChild(gallery);
   }
 
   // 结果公报印章（原型是「正式公示」圆章）：三行 —— 正式 / 公示 / 年份 · 公报
+  // 未定稿时外圈走虚线，和正式章区分开
   function createResultsStatusMark(official, year) {
-    var mark = el("div", "results-status-mark" + (official ? " is-official" : ""));
-    mark.appendChild(el("span", "results-status-mark-main", official ? "正式\n公示" : "实时\n预览"));
-    if (year) {
-      mark.appendChild(el("span", "results-status-mark-year", year + (official ? " · 公报" : " · 预览")));
-    }
+    var mark = document.createElementNS(SVG_NS, "svg");
+    mark.setAttribute("class", "seal results-status-mark" + (official ? " is-official" : ""));
+    mark.setAttribute("viewBox", "0 0 100 100");
+    mark.setAttribute("role", "img");
     mark.setAttribute("aria-label", official ? "正式公示" : "当前为实时数据预览");
+    var lines = official ? ["正式", "公示"] : ["实时", "预览"];
+    mark.innerHTML = '<g filter="url(#ink)"><circle cx="50" cy="50" r="46" fill="none" stroke="currentColor" stroke-width="3.5"' + (official ? "" : ' stroke-dasharray="7 5"') + "/>" +
+      '<circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" stroke-width="1"/>' +
+      '<g text-anchor="middle" font-weight="800" fill="currentColor" font-size="21" letter-spacing="2"><text x="51" y="41">' + lines[0] + '</text><text x="51" y="63">' + lines[1] + "</text></g>" +
+      (year ? '<text x="50" y="78" text-anchor="middle" font-size="9" letter-spacing=".6" fill="currentColor" style="font-family:Georgia,serif">' + escapeSvgText(year + (official ? " · 公报" : " · 预览")) + "</text>" : "") +
+      "</g>";
     return mark;
   }
 
@@ -8267,18 +8471,12 @@
     sheet.appendChild(head);
     sheet.appendChild(el("p", "intro-text results-intro", "按当届最终结果整理。名次和奖项保留原公示口径。"));
 
-    var summary = el("dl", "results-summary");
-    [
-      ["排名作品", rankings.length + " 篇"],
-      ["获奖作品", rankings.filter(function (row) { return !!row.award; }).length + " 篇"],
-      ["已校对评语", reviews.length + " 条"],
-    ].forEach(function (pair) {
-      var item = el("div", "results-summary-item");
-      item.appendChild(el("dt", null, pair[0]));
-      item.appendChild(el("dd", null, pair[1]));
-      summary.appendChild(item);
-    });
-    sheet.appendChild(summary);
+    renderResultsFigures(sheet, [
+      [rankings.length, "份档案"],
+      [rankings.filter(function (row) { return !!row.award; }).length, "项奖"],
+      [reviews.length, "条评语"],
+      [rankings.filter(function (row) { return row.author && row.author !== "匿名" && row.author !== "未见署名"; }).length, "位作者解封"],
+    ]);
 
     var awardedRows = rankings.filter(function (row) { return row.award; });
     renderAwardGallery(sheet, edition, awardedRows.map(function (row) {
@@ -8290,56 +8488,39 @@
       };
     }));
 
-    var tableWrap = el("div", "historical-rank-scroll");
-    var table = el("table", "rank-table historical-rank-table");
-    var headRow = el("tr");
     var dimensionLabels = rankings.length && Array.isArray(rankings[0].dimensions)
       ? rankings[0].dimensions.map(function (dim) { return dim.label; })
       : [];
-    ["名次", "作品", "作者"].concat(dimensionLabels, ["综合", "奖项"]).forEach(function (label) {
-      headRow.appendChild(el("th", null, label));
-    });
-    var thead = el("thead");
-    thead.appendChild(headRow);
-    table.appendChild(thead);
-    var tbody = el("tbody");
-    rankings.forEach(function (row) {
+    function finiteOrNull(value) {
+      return value != null && Number.isFinite(Number(value)) ? Number(value) : null;
+    }
+    renderResultsRankList(sheet, rankings.map(function (row) {
       var work = row.workSlug && worksBySlug[row.workSlug];
-      var tr = el("tr", "rank-table-row" + (row.rank <= 3 ? " rank-table-row-top rank-table-row-top-" + row.rank : ""));
-      tr.appendChild(el("td", "rank-cell", String(row.rank)));
-      var titleCell = el("td", "rank-title-cell");
-      if (work) {
-        var titleButton = el("button", "edition-index-title historical-rank-title", row.title);
-        titleButton.type = "button";
-        titleButton.addEventListener("click", function () {
-          location.hash = "#/" + edition.slug + "/" + encodeURIComponent(work.slug);
-        });
-        titleCell.appendChild(titleButton);
-      } else {
-        titleCell.appendChild(el("span", "historical-unlinked-title", row.title));
-      }
-      if (row.award) titleCell.appendChild(el("span", "rank-list-award", row.award));
-      tr.appendChild(titleCell);
-      tr.appendChild(el("td", "rank-author-cell", row.author || "未见署名"));
-      dimensionLabels.forEach(function (label) {
-        var dim = (row.dimensions || []).filter(function (item) { return item.label === label; })[0];
-        var dimScore = dim && dim.average != null && Number.isFinite(Number(dim.average)) ? Number(dim.average) : null;
-        var dimCell = el("td", "rank-score-cell", dimScore == null ? "—" : dimScore.toFixed(2));
-        if (dimScore != null) dimCell.style.setProperty("--score-pct", Math.max(0, Math.min(100, dimScore * 20)) + "%");
-        tr.appendChild(dimCell);
-      });
-      tr.appendChild(el("td", "rank-score-cell", row.overall != null && Number.isFinite(Number(row.overall)) ? Number(row.overall).toFixed(2) : "—"));
-      tr.appendChild(el("td", "historical-award-cell", row.award || "—"));
-      tbody.appendChild(tr);
-    });
-    table.appendChild(tbody);
-    tableWrap.appendChild(table);
-    appendResultsRanking(sheet, table, "全部名次", tableWrap);
+      var workReviews = row.workSlug ? reviews.filter(function (review) { return review.workSlug === row.workSlug; }) : [];
+      return {
+        rank: row.rank, title: row.title, award: row.award, author: row.author || "未见署名",
+        href: work ? "#/" + edition.slug + "/" + encodeURIComponent(work.slug) : "",
+        dims: dimensionLabels.map(function (label) {
+          var dim = (row.dimensions || []).filter(function (item) { return item.label === label; })[0];
+          return finiteOrNull(dim && dim.average);
+        }),
+        overall: finiteOrNull(row.overall),
+        detail: workReviews.length ? function () {
+          var box = el("div", "rank-row-reviews");
+          workReviews.forEach(function (review, index) { box.appendChild(renderHistoricalReview(review, index)); });
+          return box;
+        } : null,
+      };
+    }), dimensionLabels, "按综合均分排列 · 点击带评语的一行展开评委评语");
 
-    if (reviews.length) {
-      sheet.appendChild(el("h2", "panel-title historical-reviews-title", "评委评语"));
+    // 名次行里已能展开的评语不再在页底重复；只留下对不上名次行的评语（如未上架作品）
+    var rankedSlugs = {};
+    rankings.forEach(function (row) { if (row.workSlug) rankedSlugs[row.workSlug] = true; });
+    var unrankedReviews = reviews.filter(function (review) { return !review.workSlug || !rankedSlugs[review.workSlug]; });
+    if (unrankedReviews.length) {
+      sheet.appendChild(el("h2", "panel-title historical-reviews-title", "其他评委评语"));
       var groups = [];
-      reviews.forEach(function (review) {
+      unrankedReviews.forEach(function (review) {
         var key = review.workSlug || review.workTitle || review.award || "";
         var group = groups.filter(function (entry) { return entry.key === key; })[0];
         if (!group) {
@@ -8463,20 +8644,27 @@
     sheet.appendChild(
       el("p", "intro-text results-intro", resultIntro),
     );
-    var resultSummary = el("dl", "results-summary");
-    function addResultSummary(label, value) {
-      var item = el("div", "results-summary-item");
-      item.appendChild(el("dt", null, label));
-      item.appendChild(el("dd", null, value));
-      resultSummary.appendChild(item);
-    }
-    addResultSummary("收录", edition.works.length + " 篇");
     if (officialResults) {
-      addResultSummary("评委特别奖", (awardResult.specialAwards || []).length + " 项");
+      var officialAwards = (awardResult.specialAwards || []).filter(function (award) { return award && award.name && award.workId; });
+      renderResultsFigures(sheet, [
+        [edition.works.length, "份档案"],
+        [officialAwards.length, "项奖"],
+        [officialAwards.filter(function (award) { return award.review || award.excerpt; }).length, "条评语"],
+        [Object.keys(awardResult.authorReveals || {}).length, "位作者解封"],
+      ]);
     } else {
-      addResultSummary("当前阶段", isArchivedEdition(edition) ? "已封存" : phaseLabel(phaseOf(edition.slug)));
+      var resultSummary = el("dl", "results-summary");
+      [
+        ["收录", edition.works.length + " 篇"],
+        ["当前阶段", isArchivedEdition(edition) ? "已封存" : phaseLabel(phaseOf(edition.slug))],
+      ].forEach(function (pair) {
+        var item = el("div", "results-summary-item");
+        item.appendChild(el("dt", null, pair[0]));
+        item.appendChild(el("dd", null, pair[1]));
+        resultSummary.appendChild(item);
+      });
+      sheet.appendChild(resultSummary);
     }
-    sheet.appendChild(resultSummary);
 
     var insight = cloudInsights[edition.slug] || null;
     if (officialResults) renderSpecialAwardsSection(sheet, edition, awardResult);
@@ -8546,9 +8734,31 @@
     if (USE_CLOUD) {
       if (!insight || !insight.rankingsAvailable) {
         sheet.appendChild(el("p", "intro-text", "本届排名将在统计阶段或结果公示阶段开放。"));
+      } else if (officialResults) {
+        var awardsByWork = {};
+        (awardResult.specialAwards || []).forEach(function (award) {
+          if (award && award.workId && award.name) awardsByWork[award.workId] = award;
+        });
+        var officialRows = [];
+        (insight.leaderboard || []).forEach(function (row) {
+          var work = edition.works.filter(function (item) { return workId(edition.slug, item.slug) === row.workId; })[0];
+          if (!work) return;
+          var distribution = insight.distributions && insight.distributions[row.workId];
+          var award = awardsByWork[row.workId];
+          officialRows.push({
+            rank: row.rank, title: work.title, award: award ? award.name : "",
+            href: "#/" + edition.slug + "/" + encodeURIComponent(work.slug),
+            author: (awardResult.authorReveals || {})[row.workId] || "匿名",
+            dims: dimensionAveragesOf(distribution),
+            overall: Number.isFinite(Number(row.totalAvg)) ? Number(row.totalAvg) : null,
+            detail: distribution || (award && award.review) ? function () {
+              return renderRankRowDistribution(distribution, row.ratingCount, award);
+            } : null,
+          });
+        });
+        renderResultsRankList(sheet, officialRows, DIMENSIONS.map(function (dim) { return dim.label; }), "按三项均分排列 · 点击一行展开评分分布与评语");
       } else {
         var publicTable = el("table", "rank-table");
-        if (officialResults) publicTable.classList.add("official-rank-table");
         var publicHead = el("thead");
         var publicHeadRow = el("tr");
         var publicColumns = ["名次", "编号", "标题"];
@@ -8590,7 +8800,7 @@
         publicTable.appendChild(publicBody);
         appendResultsRanking(sheet, publicTable, officialResults ? "全部名次" : "综合均分排名");
       }
-      if (insight && insight.distributions) {
+      if (!officialResults && insight && insight.distributions) {
         var publicDistributionRows = el("div", "result-distribution-list");
         (insight.leaderboard || []).forEach(function (row) {
           var work = edition.works.filter(function (item) {
@@ -8722,16 +8932,21 @@
     });
     if (!awards.length) return;
     var leaderboard = (cloudInsights[edition.slug] || {}).leaderboard || [];
+    var distributions = (cloudInsights[edition.slug] || {}).distributions || null;
     renderAwardGallery(parent, edition, awards.map(function (award) {
       var work = (edition.works || []).filter(function (item) {
         return workId(edition.slug, item.slug) === award.workId;
       })[0];
       var ranking = leaderboard.filter(function (row) { return row.workId === award.workId; })[0];
+      var dimAverages = dimensionAveragesOf(distributions && distributions[award.workId]);
       return {
         award: award.name, title: work ? work.title : "档案待补录", work: work,
         author: (result.authorReveals || {})[award.workId] || "匿名",
         review: award.review || award.excerpt || "", rank: ranking && ranking.rank,
         overall: ranking && ranking.totalAvg,
+        dimensions: dimAverages.some(function (value) { return value != null; })
+          ? DIMENSIONS.map(function (dim, index) { return { label: dim.label, average: dimAverages[index] }; })
+          : [],
       };
     }).filter(function (entry) { return !!entry.work; }));
   }
@@ -9572,6 +9787,23 @@
     });
   }
 
+  // 分享图上的「授奖档案」白文方印：复用站内 #ink 墨迹滤镜，转成图片再画进 canvas。
+  // SVG 图片里不能用 currentColor / CSS 变量，所以把印色和纸色直接写进去。
+  function shareCardSeal(color, paper) {
+    var ink = document.getElementById("ink");
+    var svg = '<svg xmlns="' + SVG_NS + '" viewBox="0 0 100 100" width="248" height="248"><defs>' +
+      (ink ? new XMLSerializer().serializeToString(ink) : "") + "</defs>" +
+      '<g filter="url(#ink)"><rect x="5" y="5" width="90" height="90" rx="5" fill="' + color + '"/>' +
+      '<g fill="' + paper + '" text-anchor="middle" font-size="35" font-weight="800" font-family="Source Han Serif SC, Noto Serif SC, SimSun, serif">' +
+      '<text x="71" y="44">授</text><text x="71" y="84">奖</text><text x="29" y="44">档</text><text x="29" y="84">案</text></g></g></svg>';
+    var image = new Image();
+    return new Promise(function (resolve) {
+      image.onload = function () { resolve(image); };
+      image.onerror = function () { resolve(null); };
+      image.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    });
+  }
+
   function wrapShareText(context, text, maxWidth, maxLines) {
     var lines = [];
     var line = "";
@@ -9624,7 +9856,11 @@
     var editionUrl = shareCardUrl(edition, work);
     var urlLabel = editionUrl.replace(/^https?:\/\//, "");
 
+    var awardSeal = null;
     return Promise.resolve(document.fonts && document.fonts.ready)
+      .then(function () {
+        return award && work ? shareCardSeal(palette.volume, palette.panel).then(function (image) { awardSeal = image; }) : null;
+      })
       .then(function () { return shareCardEmblem(edition.year, palette.volume); })
       .then(function (emblem) {
         context.fillStyle = palette.background;
@@ -9668,13 +9904,22 @@
           context.fillStyle = palette.text;
           context.font = "22px " + palette.serif;
           drawShareText(context, String(award.review || "").replace(/\s+/g, " "), 110, 310 + awardTitleHeight, 900, 3, 34);
-          context.strokeStyle = palette.volume;
-          context.strokeRect(974, 165, 125, 125);
-          context.fillStyle = palette.volume;
-          context.textAlign = "center";
-          context.font = "700 31px " + palette.serif;
-          context.fillText("授奖", 1036, 218);
-          context.fillText("档案", 1036, 260);
+          if (awardSeal) {
+            context.save();
+            context.translate(1036, 227);
+            context.rotate(6 * Math.PI / 180);
+            context.globalAlpha = 0.92;
+            context.drawImage(awardSeal, -64, -64, 128, 128);
+            context.restore();
+          } else {
+            context.strokeStyle = palette.volume;
+            context.strokeRect(974, 165, 125, 125);
+            context.fillStyle = palette.volume;
+            context.textAlign = "center";
+            context.font = "700 31px " + palette.serif;
+            context.fillText("授奖", 1036, 218);
+            context.fillText("档案", 1036, 260);
+          }
           context.textAlign = "left";
           context.strokeStyle = palette.line;
           context.beginPath();
@@ -10705,6 +10950,13 @@
         seal.setAttribute("aria-label", status);
         seal.appendChild(createInkSeal(status));
         main.appendChild(seal);
+      } else if (isPublicPhase(edition.slug)) {
+        // 本届公示后书脊底部盖一枚朱文竖印（原型：「获奖」竖印用于公示后的作品与书脊）
+        main.appendChild(el("small", "archive-volume-publication", "结果已公示"));
+        var publicSeal = el("span", "archive-volume-status archive-volume-seal is-vertical");
+        publicSeal.setAttribute("aria-label", "本卷结果已公示");
+        publicSeal.appendChild(createAwardSeal("公示", "", "本卷"));
+        main.appendChild(publicSeal);
       } else {
         main.appendChild(el("small", "archive-volume-status", status));
       }
@@ -10861,14 +11113,13 @@
 
     var user = currentUser();
     var cloudStatus = el("p", "reading-shelf-sync-status", "");
+    // 游客的“仅保存在此设备”上面的说明已经讲过，不再重复一行
     if (user && USE_CLOUD) {
       cloudStatus.textContent = readingShelfCloudError
         ? "云端同步暂时失败：" + readingShelfCloudError
         : "正在同步账号阅读记录…";
-    } else {
-      cloudStatus.textContent = "仅保存在此设备";
+      shell.appendChild(cloudStatus);
     }
-    shell.appendChild(cloudStatus);
 
     if (user && USE_CLOUD) {
       var guestEntries = guestReadingEntriesForMerge();
@@ -10989,10 +11240,20 @@
     var selectedIds = categories[readingShelfFilter] || categories.all;
     var list = el("div", "reading-shelf-list");
     if (!selectedIds.length) {
-      list.appendChild(el("p", "reading-shelf-empty",
+      // 空状态是一张空白借阅卡，给一个去处
+      var emptyCard = el("div", "reading-shelf-empty reading-shelf-empty-card");
+      var emptyHead = el("div", "reading-shelf-empty-head");
+      emptyHead.appendChild(el("span", null, "借阅记录"));
+      emptyHead.appendChild(el("span", null, "尚无记录"));
+      emptyCard.appendChild(emptyHead);
+      emptyCard.appendChild(el("p", null,
         readingShelfFilter === "unrated"
           ? (votingOpen(RATING_PROGRESS_EDITION) ? "当前没有待评作品。" : "当前没有开放大众评分的届次。")
           : "这里还没有作品。打开一篇档案后，阅读记录会出现在这里。"));
+      var toCatalogue = el("a", "btn-ghost btn-tiny", "去本届目录 →");
+      toCatalogue.href = "#/" + (state.editionSlug || RATING_PROGRESS_EDITION);
+      emptyCard.appendChild(toCatalogue);
+      list.appendChild(emptyCard);
     }
     selectedIds.forEach(function (id) {
       var item = readingShelfWork(id);
@@ -11334,6 +11595,14 @@
     var shell = el("div", "home-shell edition-shell");
     shell.dataset.vol = String(edition.year);
     var anonymousAuthors = !isArchivedEdition(edition) && !isPublicPhase(edition.slug);
+    // 本届公示后目录要显示解封的作者：解封名单来自 getEditionAwards，没加载过就先取一次再重画
+    if (USE_CLOUD && !isArchivedEdition(edition) && isPublicPhase(edition.slug) && !cloudAwardsLoaded[edition.slug]) {
+      loadCloudEditionAwards(edition.slug).then(function () {
+        if (state.view === "edition" && state.editionSlug === edition.slug && !state.workSlug) renderEditionOverview(edition);
+      }).catch(function () {
+        cloudAwardsLoaded[edition.slug] = true;
+      });
+    }
     shell.classList.toggle("is-anonymous-phase", anonymousAuthors);
     var head = el("section", "edition-overview-head");
     var info = volumeInfo(edition);
@@ -11628,7 +11897,11 @@
         }
         row.dataset.workId = workId(edition.slug, work.slug);
         if (!anonymousAuthors) {
-          row.appendChild(el("span", "edition-index-author", work.author));
+          // 历届沿用导入时的署名（含「未见署名」）；本届公示后只显示解封的作者，其余仍是「匿名」
+          var shownAuthor = isArchivedEdition(edition)
+            ? work.author
+            : revealedAuthorName(edition.slug, workId(edition.slug, work.slug)) || "匿名";
+          row.appendChild(el("span", "edition-index-author", shownAuthor));
         }
         list.appendChild(row);
       });
@@ -11892,7 +12165,7 @@
         return row.workId === id;
       })[0];
       if (historicalAward || currentAward) {
-        cardBody.appendChild(el("p", "work-award-seal", "授奖 · " + (historicalAward ? historicalAward.award : currentAward.name)));
+        cardBody.appendChild(createAwardSeal(historicalAward ? historicalAward.award : currentAward.name, "seal-tilt-r work-award-seal"));
         if ((historicalAward && historicalAward.rank) || currentRanking) {
           var rank = historicalAward ? historicalAward.rank : currentRanking.rank;
           var total = historicalAward ? historicalRanking.rankings.length : ((cloudInsights[edition.slug] || {}).leaderboard || []).length;
@@ -12433,7 +12706,7 @@
     clear(refs.content);
     var sheet = el("section", "sheet results-sheet missing-archive");
     sheet.appendChild(el("p", "results-kicker", "幻梦境档案馆 · 馆藏检索"));
-    sheet.appendChild(el("span", "missing-archive-stamp", "查无此档"));
+    sheet.appendChild(createBoxSeal("查无此档", "seal-tilt-l missing-archive-stamp"));
     sheet.appendChild(el("h1", "results-title", "此档案不在馆藏中"));
     sheet.appendChild(el("p", "intro-text", "档案馆里没有这份记录。至少醒着的时候没有。可以搜索标题，或回到本卷目录。"));
     var actions = el("div", "missing-archive-actions");

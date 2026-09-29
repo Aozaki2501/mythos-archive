@@ -83,7 +83,7 @@ test("阶段只能由两位不同管理员确认，正式结果保持固定", as
   const { call, db } = await fixture(t);
   const first = "token-11111";
   const second = "token-22222";
-  const original = await call("getEditionInsights", { editionSlug: "2026" });
+  const original = await call("getEditionInsights", { editionSlug: "2026" }, first); // 统计阶段排名只对管理员开放
   assert.equal(original.publication, null);
   assert.equal(original.leaderboard[0].workId, workIds[0]);
   assert.equal((await call("getEditionAwards", { editionSlug: "2026" })).published, false);
