@@ -99,10 +99,9 @@
       ["edition-5", "档案都在这里。别被编号骗了，它们排得很整齐，梦从来没有这么听话。"],
     ],
     results: [
-      ["results-1", "找到了。看来它还没有沉进太深的梦里。"],
-      ["results-2", "检索成功。今天运气不错，白船没有开走。"],
-      ["results-3", "在这里。你记得比自己以为的要清楚。"],
-      ["results-4", "梦还没有忘记它。"],
+      ["results-1", "本卷的结果已经盖印。一起看看吧。"],
+      ["results-2", "名次只是今夜的月相，每份档案仍值得翻开。"],
+      ["results-3", "获奖的名字留在这里，其他故事也一样被好好收着。"],
     ],
     article: [
       ["article-1", "档案已经打开。往下走吧，我在这里等你。"],
@@ -952,6 +951,7 @@
 
   function scheduleSpeechBubble(reason) {
     reason = reason || "context";
+    if (reason !== "event" && window.innerWidth < 1320) return;
     if (localState.autoSpeechPaused && reason !== "event") return;
     if (assistantState.activity === "white-ship" || assistantState.activity === "departing") {
       return;

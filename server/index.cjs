@@ -1234,22 +1234,8 @@ function adminSpotlightState(settings, editionSlug, suppliedIds) {
 
 /* ---------- 邮件发送（QQ 邮箱 SMTP） ---------- */
 
-// 只允许管理员写入正文，这里仍做一层消毒，去掉脚本类内容
-function sanitizeWorkHtml(input) {
-  let html = String(input == null ? "" : input);
-  html = html.replace(
-    /<\s*(script|style|iframe|object|embed|link|meta|base|form|input|button|textarea)\b[\s\S]*?<\s*\/\s*\1\s*>/gi,
-    "",
-  );
-  html = html.replace(
-    /<\s*(script|style|iframe|object|embed|link|meta|base|form|input|button|textarea)\b[^>]*>/gi,
-    "",
-  );
-  html = html.replace(/\son[a-z-]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "");
-  html = html.replace(/\ssrcdoc\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "");
-  html = html.replace(/(href|src)\s*=\s*("|')\s*javascript:[^"']*\2/gi, '$1=$2#$2');
-  return html;
-}
+// 管理员正文仍是不可信 HTML；用解析器处理标签、属性和实体编码。
+const { sanitizeWorkHtml } = require("./sanitize-work-html.cjs");
 
 // 保留最近几次正文改动，改错了可以一键还原
 function pushWorkHistory(workId, body, updatedAt, qq) {

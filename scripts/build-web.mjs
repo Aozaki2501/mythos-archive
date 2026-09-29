@@ -27,7 +27,7 @@ const WITCH_EXPRESSION_ASSETS = [
   "witch-expression-surprised.webp",
 ];
 const BRAND_URL = "./archive-brand.webp?v=20260921-brand";
-const STATIC_VERSION = "20260928-statistics-ui-v44";
+const STATIC_VERSION = "20260929-awards-v1";
 const BUILD_DATE = STATIC_VERSION.slice(0, 8).replace(/^(\d{4})(\d{2})(\d{2})$/, "$1.$2.$3");
 const PUBLIC_ORIGIN = String(process.env.ARCHIVE_PUBLIC_ORIGIN || "").replace(/\/+$/, "");
 const built = spawnSync(process.execPath, ["scripts/build-html.mjs"], {
@@ -270,24 +270,84 @@ function writePrerenderPages(outputDir, payload, baseHtml) {
    prerender 的深链接页面不带这一段，直接展示正文。 */
 const DREAM_GATE_MARKUP = `<section class="dream-gate" id="dream-gate" hidden tabindex="-1" role="dialog" aria-modal="true" aria-label="幻梦境开场" aria-labelledby="dream-gate-title">
   <div class="dream-gate__sky" aria-hidden="true"></div>
-  <div class="dream-gate__stars" aria-hidden="true"></div>
-  <div class="dream-gate__scene" aria-hidden="true">
-    <div class="dream-gate__orbit"></div>
-    <div class="dream-gate__orbit dream-gate__orbit--two"></div>
-    <div class="dream-gate__arch">
-      <div class="dream-gate__moon"></div>
-      <div class="dream-gate__sea"></div>
-    </div>
-    <div class="dream-gate__step"></div>
+  <div class="dream-gate__stage" aria-hidden="true">
+    <svg class="dream-gate__svg" viewBox="0 0 400 400" focusable="false">
+      <defs>
+        <clipPath id="dg-arch-clip"><path d="M152 300V178a48 48 0 0 1 96 0v122z"/></clipPath>
+        <clipPath id="dg-leaf-left"><rect x="150" y="120" width="50" height="182"/></clipPath>
+        <clipPath id="dg-leaf-right"><rect x="200" y="120" width="50" height="182"/></clipPath>
+        <radialGradient id="dg-light" cx="50%" cy="62%" r="70%">
+          <stop offset="0" stop-color="var(--dg-light-core)"/>
+          <stop offset="1" stop-color="var(--dg-light)"/>
+        </radialGradient>
+        <linearGradient id="dg-leaf-paint" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#262e48"/>
+          <stop offset="0.72" stop-color="#151b2b"/>
+          <stop offset="1" stop-color="#3a2530"/>
+        </linearGradient>
+        <linearGradient id="dg-spill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="var(--dg-light-core)" stop-opacity="0.5"/>
+          <stop offset="1" stop-color="var(--dg-light-core)" stop-opacity="0"/>
+        </linearGradient>
+        <g id="dg-door-paint">
+          <rect x="150" y="120" width="100" height="182" fill="url(#dg-leaf-paint)"/>
+          <circle cx="200" cy="186" r="17" fill="var(--dg-text)"/>
+          <circle cx="208" cy="181" r="15" fill="#262e48"/>
+          <g stroke="var(--dg-text)" stroke-opacity="0.2" stroke-width="1">
+            <path d="M160 262h80M163 272h74M166 282h68M169 292h62"/>
+          </g>
+        </g>
+      </defs>
+
+      <g class="dream-gate__starfield"></g>
+
+      <!-- 星环后半圈：从拱门背后绕过 -->
+      <path class="dream-gate__ring dream-gate__ring--back" pathLength="1"
+            d="M34 262A170 50 -10 0 1 366 204"/>
+
+      <!-- 拱门：门里是光，门扇上画着月与海 -->
+      <g class="dream-gate__door">
+        <g clip-path="url(#dg-arch-clip)">
+          <rect class="dream-gate__light" x="150" y="120" width="100" height="182" fill="url(#dg-light)"/>
+          <rect class="dream-gate__light-flat" x="150" y="120" width="100" height="182"/>
+          <g class="dream-gate__leaf dream-gate__leaf--left" clip-path="url(#dg-leaf-left)"><use href="#dg-door-paint"/></g>
+          <g class="dream-gate__leaf dream-gate__leaf--right" clip-path="url(#dg-leaf-right)"><use href="#dg-door-paint"/></g>
+          <path class="dream-gate__seam" d="M200 130v170"/>
+        </g>
+        <path class="dream-gate__frame" pathLength="1" d="M152 300V178a48 48 0 0 1 96 0v122"/>
+        <path class="dream-gate__frame dream-gate__frame--outer" pathLength="1" d="M143 300V178a57 57 0 0 1 114 0v122"/>
+        <path class="dream-gate__spill" d="M152 301h96l52 60H100z" fill="url(#dg-spill)"/>
+        <path class="dream-gate__step" d="M112 301h176M128 311h144"/>
+      </g>
+
+      <!-- 星环前半圈与小火车 -->
+      <path class="dream-gate__ring dream-gate__ring--front" pathLength="1"
+            d="M34 262A170 50 -10 0 0 366 204"/>
+      <g class="dream-gate__steam"></g>
+      <g class="dream-gate__train">
+        <g class="dream-gate__car" data-car="0">
+          <rect x="-9" y="-6" width="18" height="9" rx="2"/>
+          <rect x="3" y="-11" width="4" height="6" rx="1"/>
+          <circle cx="-5" cy="4" r="2" class="dream-gate__wheel"/><circle cx="5" cy="4" r="2" class="dream-gate__wheel"/>
+        </g>
+        <g class="dream-gate__car" data-car="1">
+          <rect x="-8" y="-7" width="16" height="10" rx="2"/>
+          <path d="M-5 -4h3v3h-3zM2 -4h3v3h-3z" class="dream-gate__window"/>
+          <circle cx="-4" cy="4" r="2" class="dream-gate__wheel"/><circle cx="4" cy="4" r="2" class="dream-gate__wheel"/>
+        </g>
+        <g class="dream-gate__car" data-car="2">
+          <rect x="-8" y="-7" width="16" height="10" rx="2"/>
+          <path d="M-5 -4h3v3h-3zM2 -4h3v3h-3z" class="dream-gate__window"/>
+          <circle cx="-4" cy="4" r="2" class="dream-gate__wheel"/><circle cx="4" cy="4" r="2" class="dream-gate__wheel"/>
+        </g>
+      </g>
+    </svg>
   </div>
   <div class="dream-gate__copy">
     <div class="dream-gate__eyebrow">BEYOND THE WAKING WORLD</div>
     <h2 class="dream-gate__title" id="dream-gate-title">正在开启梦之门</h2>
     <div class="dream-gate__sub">翻过此页，梦境有了回声</div>
-    <div class="dream-gate__line" aria-hidden="true"></div>
   </div>
-  <div class="dream-gate__paper" aria-hidden="true"></div>
-  <div class="dream-gate__paper dream-gate__paper--right" aria-hidden="true"></div>
   <div class="dream-gate__brand">幻梦境档案馆</div>
   <p class="dream-gate__hint">点击任意位置或按 Esc 跳过开场</p>
 </section>
@@ -410,6 +470,7 @@ window.ARCHIVE_API_URL = ${JSON.stringify(API_URL)};
 <script src="./archive-data.js?v=${STATIC_VERSION}"></script>
 <script src="./archive-guides.js?v=${STATIC_VERSION}"></script>
 <script src="./mythos-client.js?v=${STATIC_VERSION}"></script>
+<script src="./purify.min.js?v=${STATIC_VERSION}"></script>
 <script src="./witch-assistant.js?v=${STATIC_VERSION}"></script>
 <script src="./viewer.js?v=${STATIC_VERSION}"></script>
 </body>
@@ -423,6 +484,7 @@ fs.writeFileSync(path.join(outDir, "index.html"), html, "utf8");
 fs.writeFileSync(path.join(outDir, "viewer.css"), css, "utf8");
 fs.writeFileSync(path.join(outDir, "archive-guides.js"), guidesScript, "utf8");
 fs.writeFileSync(path.join(outDir, "mythos-client.js"), apiClient, "utf8");
+fs.copyFileSync(path.join(ROOT, "node_modules", "dompurify", "dist", "purify.min.js"), path.join(outDir, "purify.min.js"));
 fs.writeFileSync(path.join(outDir, "dream-gate.js"), dreamGateScript, "utf8");
 fs.writeFileSync(path.join(outDir, "witch-assistant.js"), witchScript, "utf8");
 fs.writeFileSync(path.join(outDir, "viewer.js"), js, "utf8");

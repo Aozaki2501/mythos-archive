@@ -2974,6 +2974,30 @@ body.is-authing .mobile-bar {
   font-weight: 600;
 }
 
+.modal-head { align-items: flex-end; margin: -18px -18px 18px; padding: 14px 18px; border-top: 2px solid var(--text); border-bottom: 1px solid var(--line-strong); }
+.modal-head-main { display: grid; gap: 5px; min-width: 0; }
+.modal-archive-label { color: var(--muted); font-size: 10px; letter-spacing: .14em; }
+.modal-title { font-family: var(--display-font); font-size: 20px; }
+.modal-head-aside { display: flex; align-items: center; gap: 14px; }
+.modal-archive-date { color: var(--muted); font-family: var(--archive-number-font); font-size: 11px; white-space: nowrap; }
+.modal-close { padding: 2px 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.modal-close:hover { text-decoration: underline; }
+.modal-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+::view-transition-old(root),::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+::view-transition-new(root) { z-index: 1; }
+.comment-panel { border-top: 2px solid var(--text); }
+.comment-item,.comment-reply { margin-top: 10px; padding: 14px 16px; border: 1px solid var(--line); border-left: 3px solid var(--accent); background: var(--panel); }
+.comment-item:first-child { border-top: 1px solid var(--line); }
+.comment-name { font-family: var(--display-font); font-size: 15px; letter-spacing: 0; }
+.comment-head > span:not(.comment-name) { font-family: var(--archive-number-font); }
+.comment-head.is-judge .comment-name::after { content: "评"; display: inline-block; margin-left: 8px; padding: 1px 3px; border: 1px solid var(--accent); color: var(--accent); font-family: var(--article-font); font-size: 10px; }
+.missing-archive { max-width: 700px; margin: 70px auto; padding: 36px; border-top: 2px solid var(--text); }
+.missing-archive-stamp { display: inline-block; margin: 18px 0; padding: 9px 14px; border: 2px solid var(--accent); color: var(--accent); font-family: var(--display-font); font-weight: 700; letter-spacing: .12em; transform: rotate(-5deg); }
+.missing-archive-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+.missing-archive-actions a { display: inline-flex; align-items: center; padding: 8px 15px; text-decoration: none; }
+body[data-view="missing"] .mobile-bar-prev,body[data-view="missing"] .mobile-bar-next { display: none; }
+body[data-view="missing"] .mobile-bar-toc { flex: 1 1 auto; }
+
 .modal-sub {
   margin: 0 0 10px;
   font-size: 13px;
@@ -7062,8 +7086,10 @@ html { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 .work-title,
 .spotlight-title,
 .archive-volume-main strong {
-  word-break: keep-all;
-  overflow-wrap: anywhere;
+  word-break: normal;
+  line-break: strict;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
 }
 
 .home-brand-watermark { opacity: 0.045; }
@@ -8718,10 +8744,11 @@ html:not(.is-archive) :is(
   }
 }
 
-/* ---------- 梦门开场 ---------- */
-/* 取色规则与站点一致：深靛沿用夜间主题的墨蓝底，点缀只用褪色朱红（--accent），
-   金色按设计规范不使用。纸页取 var(--bg)，开场第一帧与当前主题页面无缝衔接。
-   动效只用 transform / opacity，且只播一次，不做无限循环。 */
+/* ---------- 梦门开场 v2 ---------- */
+/* 取色规则与站点一致：深靛沿用夜间主题的墨蓝底，点缀只用褪色朱红，
+   金色按设计规范不使用。门里的光取 var(--bg)，推门进入后与当前主题页面无缝衔接。
+   分镜：夜空亮起 → 拱门一笔画出 → 星环画出、小火车驶过 → 门扇打开 → 穿门进入。
+   入场只播一次；等待接口时只有小火车在限定时间内循环（上限即 maxWait）。 */
 
 .dream-gate {
   --dg-scene: #121622;
@@ -8729,44 +8756,37 @@ html:not(.is-archive) :is(
   --dg-scene-glow: #2b3450;
   --dg-text: #dcd6c8;
   --dg-muted: #8e94a3;
-  --dg-line: rgba(220, 214, 200, 0.2);
-  --dg-line-strong: rgba(220, 214, 200, 0.46);
+  --dg-line: rgba(220, 214, 200, 0.22);
+  --dg-line-strong: rgba(220, 214, 200, 0.62);
   --dg-seal: #cf6f5f;
-  --dg-seal-dim: rgba(207, 111, 95, 0.34);
-  --dg-paper: var(--bg);
+  --dg-train: #b5473c;
+  --dg-train-dark: #7d2c27;
+  --dg-light: var(--bg);
+  --dg-light-core: #fffaf0;
+  --dg-ease-out: cubic-bezier(0.22, 0.7, 0.2, 1);
+  --dg-ease-in: cubic-bezier(0.55, 0, 0.8, 0.3);
   position: fixed;
   inset: 0;
   z-index: 300;
-  display: grid;
-  place-items: center;
   overflow: hidden;
   background: var(--dg-scene);
   color: var(--dg-text);
-  opacity: 1;
-  transition: opacity 360ms ease;
   isolation: isolate;
   contain: layout paint;
-  /* 开场没有可见按钮：点画面任意位置或按 Esc 跳过，指针形状给出提示。 */
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
-
-/* 只给读屏软件的开场说明；视觉上由整屏画面承担。
-   焦点落在遮罩本身，给整屏描边会很怪，所以不画外框。 */
+/* 夜间主题：门里是月光而不是日光，推近后仍落到夜间页面底色。 */
+html[data-theme="dark"] .dream-gate {
+  --dg-light-core: #6a6478;
+}
 .dream-gate:focus,
 .dream-gate:focus-visible {
   outline: none;
 }
-
 .dream-gate[hidden] {
   display: none !important;
 }
-
-.dream-gate.is-leaving {
-  opacity: 0;
-  pointer-events: none;
-}
-
-/* 梦门成功接管时，旧的启动转圈不再显示，也不再持续占用动画帧。 */
 html.is-dream-gate .boot-splash {
   display: none;
 }
@@ -8775,180 +8795,190 @@ html.is-dream-gate .boot-splash {
   position: absolute;
   inset: 0;
   background: radial-gradient(
-    ellipse at 50% 46%,
+    ellipse at 50% 44%,
     var(--dg-scene-glow) 0%,
-    var(--dg-scene-mid) 28%,
-    var(--dg-scene) 64%
+    var(--dg-scene-mid) 30%,
+    var(--dg-scene) 68%
   );
+  animation: dg-fade-in 0.6s ease both;
 }
 
-.dream-gate__stars {
+/* 舞台：拱门中心固定在画面中上部，推门时以门心为原点放大。 */
+.dream-gate__stage {
   position: absolute;
   left: 50%;
-  top: 42%;
-  width: min(82vw, 560px);
-  height: 400px;
+  top: 44%;
+  width: min(118vw, 700px, 86vh);
+  aspect-ratio: 1;
   transform: translate(-50%, -50%);
-  background:
-    radial-gradient(circle at 12% 28%, var(--dg-text) 0 1px, transparent 2px),
-    radial-gradient(circle at 81% 14%, #7fa3cc 0 1px, transparent 2px),
-    radial-gradient(circle at 25% 72%, var(--dg-seal) 0 1px, transparent 2px),
-    radial-gradient(circle at 91% 65%, var(--dg-text) 0 1px, transparent 2px),
-    radial-gradient(circle at 62% 9%, var(--dg-text) 0 1px, transparent 2px),
-    radial-gradient(circle at 6% 53%, #9db2c6 0 1px, transparent 2px);
-  animation: dg-stars 0.7s ease both;
+}
+.dream-gate__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  transform-origin: 50% 57%;
+  will-change: transform;
 }
 
-.dream-gate__scene {
-  position: relative;
-  width: 280px;
-  height: 320px;
-  display: grid;
-  place-items: center;
-  margin-top: -64px;
-  animation: dg-emerge 0.7s ease both;
+/* 星星由脚本撒在 starfield 里，每颗各自错开闪烁。 */
+.dream-gate__star {
+  fill: var(--dg-text);
+  opacity: 0;
+  animation: dg-star 2.6s ease-in-out var(--d, 0s) both;
+}
+.dream-gate__star--blue {
+  fill: #9db2c6;
+}
+.dream-gate__star--seal {
+  fill: var(--dg-seal);
+}
+.dream-gate__sparkle {
+  fill: var(--dg-text);
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: dg-sparkle 1.4s var(--dg-ease-out) var(--d, 0s) both;
 }
 
-.dream-gate__orbit {
-  position: absolute;
-  width: 270px;
-  height: 270px;
-  border: 1px solid var(--dg-line);
-  border-radius: 50%;
-  transform: rotate(-28deg) scaleY(0.68);
+/* 线稿：拱门、星环用 pathLength=1 一笔画出。 */
+.dream-gate__frame,
+.dream-gate__ring,
+.dream-gate__step,
+.dream-gate__seam {
+  fill: none;
+  stroke-linecap: round;
 }
-
-.dream-gate__orbit::before {
-  content: "";
-  position: absolute;
-  left: 37px;
-  top: 27px;
-  width: 5px;
-  height: 5px;
-  background: var(--dg-seal);
-  border-radius: 50%;
+.dream-gate__frame {
+  stroke: var(--dg-line-strong);
+  stroke-width: 1.4;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: dg-draw 0.9s var(--dg-ease-out) 0.15s forwards;
 }
-
-.dream-gate__orbit--two {
-  width: 235px;
-  height: 235px;
-  transform: rotate(38deg) scaleY(0.8);
-  border-color: rgba(127, 163, 204, 0.24);
+.dream-gate__frame--outer {
+  stroke: var(--dg-line);
+  stroke-width: 1;
+  animation-delay: 0.3s;
 }
-
-.dream-gate__arch {
-  position: relative;
-  width: 136px;
-  height: 215px;
-  border: 1px solid var(--dg-line-strong);
-  border-radius: 80px 80px 2px 2px;
-  background: linear-gradient(180deg, #232a42, #141a29 75%, rgba(207, 111, 95, 0.16));
-  box-shadow:
-    inset 0 0 0 7px #0d1119,
-    inset 0 0 0 8px rgba(220, 214, 200, 0.16);
+.dream-gate__ring {
+  stroke: var(--dg-line);
+  stroke-width: 1.2;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: dg-draw 1s var(--dg-ease-out) 0.45s forwards;
 }
-
-.dream-gate__moon {
-  position: absolute;
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  top: 38px;
-  left: 46px;
-  background: var(--dg-text);
-  box-shadow: 0 0 22px rgba(220, 214, 200, 0.18);
+.dream-gate__ring--front {
+  stroke: rgba(220, 214, 200, 0.4);
+  animation-delay: 0.55s;
 }
-
-.dream-gate__moon::after {
-  content: "";
-  position: absolute;
-  inset: -4px -9px 7px 10px;
-  background: #232a42;
-  border-radius: 50%;
-}
-
-.dream-gate__sea {
-  position: absolute;
-  left: 15px;
-  right: 15px;
-  bottom: 24px;
-  height: 48px;
-  background: repeating-linear-gradient(
-    180deg,
-    transparent 0 9px,
-    rgba(220, 214, 200, 0.16) 9px 10px
-  );
-  transform: perspective(80px) rotateX(30deg);
-}
-
 .dream-gate__step {
-  position: absolute;
-  bottom: 25px;
-  width: 180px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--dg-seal-dim), transparent);
+  stroke: rgba(207, 111, 95, 0.34);
+  stroke-width: 1;
+  animation: dg-fade-in 0.6s ease 0.7s both;
+}
+.dream-gate__seam {
+  stroke: rgba(13, 17, 25, 0.9);
+  stroke-width: 1.2;
 }
 
-.dream-gate__step::after {
-  content: "";
-  position: absolute;
-  top: 12px;
-  left: -20px;
-  right: -20px;
-  height: 1px;
-  background: inherit;
+/* 门扇：以左右门框为铰链，打开时横向压缩并略微变暗，模拟向内推开。 */
+.dream-gate__door > g {
+  animation: dg-fade-in 0.7s ease 0.35s both;
+}
+.dream-gate__leaf {
+  transition:
+    transform 0.72s var(--dg-ease-out),
+    opacity 0.72s ease;
+}
+.dream-gate__leaf--left {
+  transform-origin: 152px 0;
+}
+.dream-gate__leaf--right {
+  transform-origin: 248px 0;
+}
+.dream-gate__light {
+  opacity: 0.9;
+}
+/* 穿门时门里的光渐变为纯页面底色，放大后与页面完全同色。 */
+.dream-gate__light-flat {
+  fill: var(--dg-light);
+  opacity: 0;
+}
+.dream-gate.is-opening .dream-gate__light-flat {
+  animation: dg-fade-in 0.6s ease 0.6s forwards;
+}
+.dream-gate__spill {
+  opacity: 0;
+  transition: opacity 0.6s ease 0.1s;
 }
 
+/* 小火车：位置由脚本沿星环前半圈逐帧计算。 */
+.dream-gate__train {
+  opacity: 0;
+}
+.dream-gate__car rect {
+  fill: var(--dg-train);
+  stroke: var(--dg-train-dark);
+  stroke-width: 0.8;
+}
+.dream-gate__car[data-car="0"] rect:first-child {
+  fill: #c2564a;
+}
+.dream-gate__window {
+  fill: rgba(255, 238, 214, 0.85);
+}
+.dream-gate__wheel {
+  fill: #0d1119;
+  stroke: var(--dg-train-dark);
+  stroke-width: 0.6;
+}
+.dream-gate__puff {
+  fill: var(--dg-text);
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: dg-puff 1.1s ease-out forwards;
+}
+
+/* 文案 */
 .dream-gate__copy {
   position: absolute;
-  top: calc(50% + 116px);
+  top: calc(44% + min(35vw, 206px, 25.5vh));
   left: 20px;
   right: 20px;
   text-align: center;
-  animation: dg-copy 0.75s ease both;
+  transition:
+    opacity 0.3s ease,
+    transform 0.4s var(--dg-ease-in);
 }
-
 .dream-gate__eyebrow {
   font-family: var(--sans);
   font-size: 10px;
   line-height: 1.5;
   letter-spacing: 0.38em;
   color: var(--dg-muted);
+  animation: dg-rise 0.7s var(--dg-ease-out) 0.6s both;
 }
-
 .dream-gate__title {
-  margin: 12px 0 8px;
+  margin: 10px 0 8px;
   font-family: var(--article-font);
-  font-size: clamp(23px, 5vw, 30px);
+  font-size: clamp(22px, 5vw, 30px);
   font-weight: 400;
   line-height: 1.5;
   letter-spacing: 0.22em;
+  text-indent: 0.22em;
 }
-
+.dream-gate__char {
+  display: inline-block;
+  animation: dg-ink 0.7s var(--dg-ease-out) calc(0.75s + var(--i) * 0.07s) both;
+}
 .dream-gate__sub {
   font-size: 12px;
   letter-spacing: 0.15em;
   color: var(--dg-muted);
+  animation: dg-rise 0.7s var(--dg-ease-out) 1.3s both;
 }
-
-.dream-gate__line {
-  margin: 22px auto 0;
-  width: 96px;
-  height: 1px;
-  background: rgba(207, 111, 95, 0.22);
-  overflow: hidden;
-}
-
-.dream-gate__line::after {
-  content: "";
-  display: block;
-  height: 100%;
-  background: var(--dg-seal);
-  transform: scaleX(0.2);
-  transform-origin: left;
-  animation: dg-line 0.9s ease both;
-}
-
 .dream-gate__brand {
   position: absolute;
   left: 24px;
@@ -8957,9 +8987,9 @@ html.is-dream-gate .boot-splash {
   font-size: 12px;
   letter-spacing: 0.25em;
   color: var(--dg-muted);
-  animation: dg-copy 0.75s ease both;
+  animation: dg-fade-in 0.8s ease 0.4s both;
+  transition: opacity 0.3s ease;
 }
-
 .dream-gate__hint {
   position: absolute;
   width: 1px;
@@ -8972,85 +9002,87 @@ html.is-dream-gate .boot-splash {
   clip-path: inset(50%);
 }
 
-.dream-gate__paper {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 50.1%;
-  background: var(--dg-paper);
-  transform-origin: right center;
-  animation: dg-left 0.62s cubic-bezier(0.22, 0.7, 0.2, 1) both;
-  border-right: 1px solid var(--line-strong);
+/* ---- 退场：开门 → 穿门 → 与页面衔接 ---- */
+.dream-gate.is-opening .dream-gate__leaf--left {
+  transform: scaleX(0.08) skewY(-4deg);
+  opacity: 0.5;
+}
+.dream-gate.is-opening .dream-gate__leaf--right {
+  transform: scaleX(0.08) skewY(4deg);
+  opacity: 0.5;
+}
+.dream-gate.is-opening .dream-gate__spill {
+  opacity: 1;
+}
+.dream-gate__seam {
+  transition: opacity 0.25s ease;
+}
+.dream-gate.is-opening .dream-gate__seam {
+  opacity: 0;
+}
+/* 火车留在原地继续开，但在镜头推近前淡出，不从画面前冲过去。 */
+.dream-gate__car,
+.dream-gate__steam {
+  transition: opacity 0.3s ease 0.3s;
+}
+.dream-gate.is-opening .dream-gate__car,
+.dream-gate.is-opening .dream-gate__steam {
+  opacity: 0;
+}
+.dream-gate.is-opening .dream-gate__copy,
+.dream-gate.is-opening .dream-gate__brand {
+  opacity: 0;
+  transform: translateY(10px);
+}
+.dream-gate.is-opening .dream-gate__svg {
+  animation: dg-push 0.95s var(--dg-ease-in) 0.42s forwards;
+}
+.dream-gate.is-opening .dream-gate__sky {
+  animation: dg-sky-out 0.95s var(--dg-ease-in) 0.42s forwards;
+}
+.dream-gate.is-leaving {
+  opacity: 0;
+  transition: opacity 0.32s ease;
+  pointer-events: none;
 }
 
-.dream-gate__paper--right {
-  left: auto;
-  right: 0;
-  transform-origin: left center;
-  border-right: 0;
-  border-left: 1px solid var(--line-strong);
-  animation-name: dg-right;
+@keyframes dg-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
-
-@keyframes dg-left {
-  0%,
-  10% {
-    transform: translateX(0);
-  }
-  100% {
-    transform: translateX(-101%);
-  }
+@keyframes dg-draw {
+  to { stroke-dashoffset: 0; }
 }
-
-@keyframes dg-right {
-  0%,
-  10% {
-    transform: translateX(0);
-  }
-  100% {
-    transform: translateX(101%);
-  }
+@keyframes dg-star {
+  0% { opacity: 0; }
+  45% { opacity: var(--o, 0.8); }
+  70% { opacity: calc(var(--o, 0.8) * 0.45); }
+  100% { opacity: var(--o, 0.8); }
 }
-
-@keyframes dg-emerge {
-  0%,
-  12% {
-    opacity: 0;
-    transform: translateY(14px) scale(0.94);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+@keyframes dg-sparkle {
+  0% { opacity: 0; transform: scale(0.2) rotate(-40deg); }
+  60% { opacity: 1; transform: scale(1.15) rotate(0deg); }
+  100% { opacity: 0.85; transform: scale(1) rotate(0deg); }
 }
-
-@keyframes dg-copy {
-  0%,
-  28% {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
+@keyframes dg-puff {
+  0% { opacity: 0.55; transform: scale(0.4); }
+  100% { opacity: 0; transform: translate(-6px, -14px) scale(1.8); }
 }
-
-@keyframes dg-stars {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 0.8;
-  }
+@keyframes dg-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
-
-@keyframes dg-line {
-  from {
-    transform: scaleX(0.2);
-  }
-  to {
-    transform: scaleX(1);
-  }
+@keyframes dg-ink {
+  from { opacity: 0; transform: translateY(6px); filter: blur(4px); }
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+@keyframes dg-push {
+  0% { transform: scale(1); }
+  100% { transform: scale(24); }
+}
+@keyframes dg-sky-out {
+  0%, 40% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 .dream-gate.is-paused *,
@@ -9060,17 +9092,15 @@ html.is-dream-gate .boot-splash {
 }
 
 @media (max-height: 560px) {
-  .dream-gate__scene {
-    transform: scale(0.7);
-    margin-top: -95px;
-    animation: none;
+  .dream-gate__stage {
+    top: 40%;
+    width: min(96vh, 92vw);
   }
-
   .dream-gate__copy {
-    top: calc(50% + 70px);
+    top: auto;
+    bottom: 16px;
   }
-
-  .dream-gate__line {
+  .dream-gate__sub {
     display: none;
   }
 }
@@ -9083,13 +9113,19 @@ html.is-dream-gate .boot-splash {
     animation: none !important;
     transition: none !important;
   }
-
-  .dream-gate__paper {
-    display: none;
+  .dream-gate__frame,
+  .dream-gate__ring {
+    stroke-dashoffset: 0;
   }
-
-  .dream-gate__stars {
-    opacity: 0.8;
+  .dream-gate__star,
+  .dream-gate__sparkle {
+    opacity: var(--o, 0.8);
+  }
+  .dream-gate__train {
+    opacity: 1;
+  }
+  .dream-gate.is-leaving {
+    transition: opacity 0.2s ease !important;
   }
 }
 
@@ -9259,7 +9295,8 @@ html.is-dream-gate .boot-splash {
 .reading-shelf-toolbar { display: grid; gap: 12px; margin: 24px 0 14px; }
 .reading-shelf-toolbar > .reading-shelf-actions { justify-content: flex-end; }
 .reading-shelf-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.reading-shelf-filter { min-height: 40px; padding: 6px 14px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.reading-shelf-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.reading-shelf-filter { min-height: 40px; padding: 6px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
 .reading-shelf-filter.is-active { border-color: var(--accent); background: var(--accent-weak); color: var(--text); }
 .reading-shelf-list { display: grid; gap: 10px; }
 .reading-shelf-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
@@ -9270,6 +9307,139 @@ html.is-dream-gate .boot-splash {
 .reading-shelf-item-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .reading-shelf-read-label { padding: 5px 8px; color: var(--muted); font-size: 12px; }
 .reading-shelf-empty { padding: 24px; border: 1px dashed var(--line-strong); border-radius: var(--radius); color: var(--muted); text-align: center; line-height: 1.7; }
+
+.home-results-published { display: grid; justify-items: start; gap: 8px; }
+.home-results-published p { margin: 0; }
+.home-results-link { margin-top: 4px; text-decoration: none; }
+.home-award-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; width: 100%; margin: 8px 0; }
+.home-award-item { display: grid; gap: 6px; min-width: 0; padding: 12px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--text); text-decoration: none; }
+.home-award-item:first-child { border-color: var(--accent); }
+.home-award-item span { color: var(--accent); font-size: 11px; }
+.home-award-item strong { overflow: hidden; font-family: var(--display-font); font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.home-award-item:hover { border-color: var(--accent); }
+.work-award-seal { position: absolute; top: 56px; right: 32px; max-width: 150px; margin: 0; padding: 9px 12px; border: 2px solid var(--accent); color: var(--accent); font-family: var(--display-font); font-weight: 700; letter-spacing: .08em; text-align: center; transform: rotate(5deg); }
+.work-card:has(.work-award-seal) .work-title { max-width: calc(100% - 180px); }
+.work-award-rank { margin: 8px 0 0; color: var(--muted); font-family: var(--archive-number-font); }
+.work-award-share { display: block; width: max-content; margin: 10px 0 4px; }
+.rank-table-collapsed tbody tr:nth-child(n+21) { display: none; }
+.results-show-all { margin: 0 0 32px; }
+.results-distributions { margin: 20px 0 34px; border-top: 1px solid var(--line-strong); }
+.results-distributions > summary { padding: 16px 0; color: var(--accent); font-family: var(--article-font); font-size: 16px; cursor: pointer; }
+.results-section-heading { display: flex; align-items: baseline; gap: 10px; margin: 36px 0 14px; padding-bottom: 8px; border-bottom: 2px solid var(--text); }
+.results-section-heading .panel-title { margin: 0; }
+.results-section-number { color: var(--accent); font-family: var(--archive-number-font); font-size: 13px; }
+.results-section-caption { margin-left: auto; color: var(--muted); font-size: 11px; letter-spacing: .08em; }
+.award-gallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 38px; }
+.award-card { min-width: 0; border: 1px solid var(--line-strong); background: var(--panel); }
+.award-card-main { display: flex; flex-direction: column; height: 100%; min-width: 0; padding: 16px; }
+.award-card-head { display: flex; justify-content: space-between; gap: 10px; margin: -16px -16px 15px; padding: 8px 14px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.award-card-head span:last-child { color: var(--accent); white-space: nowrap; }
+.award-card-name { align-self: flex-start; margin: 0 0 11px; padding: 4px 8px; border: 1px solid var(--accent); color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .08em; }
+.award-card-title { margin: 0; color: var(--text); font-family: var(--display-font); font-size: 22px; line-height: 1.35; overflow-wrap: anywhere; }
+.award-card-title a { color: inherit; text-decoration: none; }
+.award-card-title a:hover { color: var(--accent); text-decoration: underline; }
+.award-card-author,.award-card-dimensions { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+.award-card-quote { margin: 16px 0; padding: 0 0 0 12px; border-left: 2px solid var(--accent); color: var(--text); font-family: var(--article-font); font-size: 13px; line-height: 1.7; }
+.award-card-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); }
+.award-card-footer a { display: inline-flex; align-items: center; min-height: 32px; padding: 4px 10px; font-size: 12px; text-decoration: none; }
+.award-card-review-details { font-size: 12px; line-height: 1.6; }
+.award-card-review-details summary { color: var(--accent); cursor: pointer; }
+.award-card-review-details p { margin: 8px 0; color: var(--text); }
+.award-card-featured { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) 25%; }
+.award-card-featured .award-card-main { padding: 20px; }
+.award-card-featured .award-card-head { margin: -20px -20px 22px; padding: 10px 18px; }
+.award-card-featured .award-card-title { font-size: 32px; }
+.award-card-featured .award-card-quote { max-width: 680px; font-size: 15px; }
+.award-card-aside { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 18px; border-left: 1px solid var(--line); background: var(--bg); text-align: center; }
+.award-card-stamp { align-self: flex-end; margin-bottom: auto; padding: 7px; background: var(--accent); color: var(--panel); font-size: 12px; font-weight: 700; line-height: 1.1; white-space: pre-line; transform: rotate(-6deg); }
+.award-card-rank { color: var(--text); font-family: var(--archive-number-font); font-size: 80px; font-weight: 400; line-height: 1; }
+.award-card-rank-label { color: var(--muted); font-size: 11px; }
+.award-card-overall { margin-top: 14px; color: var(--text); font-family: var(--archive-number-font); font-size: 22px; }
+.rank-list-award { display: none; margin-left: 6px; padding: 1px 4px; border: 1px solid var(--accent); color: var(--accent); font-size: 10px; vertical-align: middle; }
+.result-work-distribution-summary { justify-content: flex-start; }
+.result-work-distribution-meta { margin-left: auto; }
+.witch-portrait { mask-image: linear-gradient(to bottom, #000 86%, transparent); }
+
+@media (min-width: 801px) {
+  .official-rank-table { display: block; border-top: 0; }
+  .official-rank-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+  .official-rank-table tbody { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 20px; }
+  .official-rank-table tr { display: grid; grid-template-columns: 30px minmax(0, 1fr) 54px; grid-template-rows: auto auto; align-items: center; gap: 1px 8px; min-width: 0; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .official-rank-table td { min-width: 0; padding: 0; border: 0; }
+  .official-rank-table td:nth-child(1) { grid-column: 1; grid-row: 1 / 3; }
+  .official-rank-table td:nth-child(2),.official-rank-table td:nth-child(6) { display: none; }
+  .official-rank-table td:nth-child(3) { grid-column: 2; grid-row: 1; }
+  .official-rank-table td:nth-child(4) { grid-column: 2; grid-row: 2; color: var(--muted); font-size: 11px; }
+  .official-rank-table td:nth-child(5) { grid-column: 3; grid-row: 1 / 3; text-align: right; }
+  .official-rank-table .rank-title-link { max-width: 100%; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+  .historical-rank-scroll { overflow: visible; }
+  .historical-rank-table { display: block; width: 100%; min-width: 0; border-top: 0; }
+  .historical-rank-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+  .historical-rank-table tbody { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 20px; }
+  .historical-rank-table tr { display: grid; grid-template-columns: 30px minmax(0, 1fr) 70px 46px; grid-template-rows: auto auto; align-items: center; gap: 1px 8px; min-width: 0; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .historical-rank-table td { min-width: 0; padding: 0; border: 0; }
+  .historical-rank-table td:nth-child(1) { grid-column: 1; grid-row: 1 / 3; color: var(--accent); font-size: 12px; }
+  .historical-rank-table td:nth-child(2) { grid-column: 2; grid-row: 1; display: flex; align-items: center; min-width: 0; }
+  .historical-rank-table td:nth-child(3) { grid-column: 2; grid-row: 2; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .historical-rank-table td:nth-child(4),.historical-rank-table td:nth-child(5) { padding-bottom: 3px; text-align: right; background-repeat: no-repeat; background-position: left bottom; background-size: 100% 2px; }
+  .historical-rank-table td:nth-child(4) { grid-column: 3; grid-row: 1; background-image: linear-gradient(to right, #397d70 var(--score-pct, 0%), var(--line) var(--score-pct, 0%)); }
+  .historical-rank-table td:nth-child(5) { grid-column: 3; grid-row: 2; background-image: linear-gradient(to right, var(--accent) var(--score-pct, 0%), var(--line) var(--score-pct, 0%)); }
+  .historical-rank-table td:nth-child(6) { grid-column: 4; grid-row: 1 / 3; text-align: right; }
+  .historical-rank-table td:nth-child(7) { display: none; }
+  .historical-rank-table .historical-rank-title { max-width: 100%; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+  .historical-rank-table .rank-list-award { display: inline-block; flex: none; }
+}
+
+@media (max-width: 800px) {
+  .work-award-seal { position: static; display: inline-block; max-width: 100%; margin: 12px 0 0; transform: none; }
+  .work-card:has(.work-award-seal) .work-title { max-width: 100%; }
+  .home-award-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .award-gallery { grid-template-columns: 1fr; }
+  .award-card-featured { grid-template-columns: minmax(0, 1fr); }
+  .award-card-aside { flex-direction: row; justify-content: flex-start; gap: 8px; border-left: 0; border-top: 1px solid var(--line); }
+  .award-card-stamp { align-self: center; margin: 0 auto 0 0; }
+  .award-card-rank { font-size: 44px; }
+  .award-card-overall { margin: 0 0 0 auto; }
+  .award-card-featured .award-card-title { font-size: 26px; }
+  .results-section-caption { display: none; }
+  .results-sheet .rank-table,
+  .results-sheet .historical-rank-table { display: block; width: 100%; min-width: 0; overflow: visible; white-space: normal; border: 0; }
+  .results-sheet .rank-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+  .results-sheet .rank-table tbody { display: grid; gap: 10px; }
+  .results-sheet .rank-table tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 12px; padding: 14px; border: 1px solid var(--line); background: var(--panel); }
+  .results-sheet .rank-table-collapsed tbody tr:nth-child(n+21) { display: none; }
+  .results-sheet .rank-table td { display: grid; gap: 3px; min-width: 0; padding: 0; border: 0; white-space: normal; overflow-wrap: anywhere; }
+  .results-sheet .rank-table td::before { content: attr(data-label); color: var(--muted); font-size: 11px; }
+  .results-sheet .rank-table .rank-title-cell { grid-column: 1 / -1; grid-row: 1; font-size: 17px; }
+  .results-sheet .rank-table .rank-title-cell::before { display: none; }
+  .results-sheet .rank-table .rank-title-link,
+  .results-sheet .rank-table .historical-rank-title { max-width: 100%; white-space: normal; text-align: left; }
+  .results-sheet .rank-table .rank-title-cell { text-align: left; }
+  .results-sheet .rank-table .rank-title-cell button { margin-left: 0; }
+  .results-sheet .official-rank-table tr { grid-template-columns: 34px minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: center; gap: 8px; }
+  .results-sheet .official-rank-table td:nth-child(1) { grid-column: 1; grid-row: 1 / 3; align-self: start; color: var(--accent); font-size: 19px; }
+  .results-sheet .official-rank-table td:nth-child(1)::before { display: none; }
+  .results-sheet .official-rank-table td:nth-child(2),
+  .results-sheet .official-rank-table td:nth-child(6) { display: none; }
+  .results-sheet .official-rank-table td:nth-child(3) { grid-column: 2 / 4; grid-row: 1; font-size: 16px; }
+  .results-sheet .official-rank-table td:nth-child(4) { grid-column: 2; grid-row: 2; color: var(--muted); font-size: 12px; }
+  .results-sheet .official-rank-table td:nth-child(5) { grid-column: 3; grid-row: 2; text-align: right; }
+  .results-sheet .official-rank-table td:nth-child(4)::before { display: none; }
+  .results-sheet .official-rank-table .rank-marker,
+  .results-sheet .official-rank-table .rank-title-leader,
+  .results-sheet .official-rank-table .author-release-mark { display: none; }
+  .results-sheet .official-rank-table .result-award-mark { display: inline-block; width: auto; min-height: 0; padding: 3px 5px; font-size: 10px; writing-mode: horizontal-tb; }
+  .results-sheet .official-rank-table .rank-title-content { justify-content: flex-start; }
+  .results-sheet .official-rank-table .rank-title-link { flex: 0 1 auto; max-width: calc(100% - 48px); white-space: normal; text-align: left; }
+  .results-sheet .historical-rank-scroll { overflow: visible; }
+  .work-meta-details > summary { list-style: none; }
+  .work-meta-details > summary::-webkit-details-marker { display: none; }
+  .work-meta-details > summary::after { content: "▾"; margin-left: auto; transition: transform var(--dur-quick) ease; }
+  .work-meta-details[open] > summary::after { transform: rotate(180deg); }
+  body[data-view="results"] .mobile-bar-prev,
+  body[data-view="results"] .mobile-bar-next { display: none; }
+  body[data-view="results"] .mobile-bar-toc { flex: 1 1 auto; }
+}
 
 .notification-count { margin-left: 5px; vertical-align: middle; }
 .notification-list { display: grid; gap: 10px; margin-top: 12px; }

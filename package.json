@@ -10,6 +10,8 @@
     "preview": "node scripts/local-preview.mjs"
   },
   "dependencies": {
-    "marked": "^15.0.7"
+    "dompurify": "^3.4.16",
+    "marked": "^15.0.7",
+    "sanitize-html": "^2.17.7"
   }
 }

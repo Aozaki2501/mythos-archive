@@ -332,19 +332,21 @@
   }
 
   function stripHtmlText(html) {
-    var box = document.createElement("div");
-    box.innerHTML = String(html || "");
-    return (box.textContent || "").replace(/\s+/g, " ").trim();
+    var doc = new DOMParser().parseFromString(safeWorkHtml(html), "text/html");
+    return (doc.body.textContent || "").replace(/\s+/g, " ").trim();
+  }
+
+  function safeWorkHtml(html) {
+    return window.DOMPurify ? window.DOMPurify.sanitize(String(html || "")) : "";
   }
 
   function workExcerpt(work) {
     if (!work) return "";
     var text = work.excerpt || "";
     if (!text) {
-      var box = document.createElement("div");
-      box.innerHTML = work.html || "";
-      var firstParagraph = box.querySelector("p");
-      text = firstParagraph ? firstParagraph.textContent : box.textContent;
+      var doc = new DOMParser().parseFromString(safeWorkHtml(work.html), "text/html");
+      var firstParagraph = doc.body.querySelector("p");
+      text = firstParagraph ? firstParagraph.textContent : doc.body.textContent;
     }
     text = String(text || "").replace(/\s+/g, " ").trim();
     return text.length > 78 ? text.slice(0, 78) + "…" : text;
@@ -3179,10 +3181,22 @@
     applyTheme(theme, false);
     if (!refs.themeToggle) return;
     refs.themeToggle.addEventListener("click", function () {
-      applyTheme(
-        document.documentElement.dataset.theme === "dark" ? "light" : "dark",
-        true,
-      );
+      var next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+      if (!document.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        applyTheme(next, true);
+        return;
+      }
+      var rect = refs.themeToggle.getBoundingClientRect();
+      var x = rect.left + rect.width / 2;
+      var y = rect.top + rect.height / 2;
+      var radius = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+      var transition = document.startViewTransition(function () { applyTheme(next, true); });
+      transition.ready.then(function () {
+        document.documentElement.animate(
+          { clipPath: ["circle(0 at " + x + "px " + y + "px)", "circle(" + radius + "px at " + x + "px " + y + "px)"] },
+          { duration: 460, easing: "ease-out", pseudoElement: "::view-transition-new(root)" },
+        );
+      }).catch(function () { /* 浏览器会自动退回直接切换 */ });
     });
   }
 
@@ -4312,13 +4326,19 @@
     dialog.setAttribute("aria-labelledby", "modal-title");
     dialog.tabIndex = -1;
     var head = el("div", "modal-head");
+    var headMain = el("div", "modal-head-main");
+    headMain.appendChild(el("span", "modal-archive-label", "幻梦境档案馆 · 档案卡"));
     var heading = el("h2", "modal-title", title);
     heading.id = "modal-title";
-    head.appendChild(heading);
-    var closeBtn = el("button", "btn-ghost btn-tiny", "关闭");
+    headMain.appendChild(heading);
+    head.appendChild(headMain);
+    var headAside = el("div", "modal-head-aside");
+    headAside.appendChild(el("span", "modal-archive-date", formatShortDate(new Date().toISOString())));
+    var closeBtn = el("button", "modal-close", "合上");
     closeBtn.type = "button";
     closeBtn.addEventListener("click", closeModal);
-    head.appendChild(closeBtn);
+    headAside.appendChild(closeBtn);
+    head.appendChild(headAside);
     dialog.appendChild(head);
     dialog.appendChild(bodyNode);
     refs.modalRoot.appendChild(backdrop);
@@ -6526,7 +6546,7 @@
       var err = el("p", "auth-error");
       err.setAttribute("aria-live", "polite");
       var preview = el("div", "editor-preview work-body" + (id === "2026/34-沃多在哪里？" ? " work-no-indent" : ""));
-      preview.innerHTML = source;
+      preview.innerHTML = safeWorkHtml(source);
 
       var row = el("div", "admin-row editor-actions");
       var save = el("button", "btn", "保存并生效");
@@ -6585,7 +6605,7 @@
       body.appendChild(preview);
 
       area.addEventListener("input", function () {
-        preview.innerHTML = area.value;
+        preview.innerHTML = safeWorkHtml(area.value);
       });
       close.addEventListener("click", closeModal);
       save.addEventListener("click", function () {
@@ -6924,7 +6944,9 @@
       item.setAttribute("role", "listitem");
       item.appendChild(el("span", "phase-timeline-label", phase.label));
       var due = phaseDeadlineOf(slug, phase.key);
-      var meta = due
+      var meta = phase.key === "公示" && index === currentIndex
+        ? "结果已公示"
+        : due
         ? "截止 " + formatShortDate(due)
         : index < currentIndex
           ? "已完成"
@@ -6939,7 +6961,7 @@
     var mobileSummary = el(
       "div",
       "phase-timeline-mobile-summary",
-      currentPhase.label + (currentDue ? " · " + formatShortDate(currentDue) + " 截止" : " · 阶段进行中"),
+      currentPhase.label + (currentPhase.key === "公示" ? " · 结果已公示" : currentDue ? " · " + formatShortDate(currentDue) + " 截止" : " · 阶段进行中"),
     );
     mobileSummary.setAttribute("role", "note");
     timeline.appendChild(mobileSummary);
@@ -7255,7 +7277,7 @@
   /* ---------- 评论 ---------- */
 
   function renderCommentPanel(id) {
-    var panel = el("section", "panel");
+    var panel = el("section", "panel comment-panel");
     panel.id = "comments-panel";
     var list = commentsOf(id);
     var judgeComments = [];
@@ -7266,7 +7288,7 @@
     });
 
     panel.appendChild(
-      el("h2", "panel-title", "评论" + (list.length ? " " + list.length : "")),
+      el("h2", "panel-title", "读者回声" + (list.length ? " " + list.length : "")),
     );
 
     if (showJudgeBox() && judgeComments.length) {
@@ -7527,12 +7549,13 @@
     var head = el("div", "comment-head");
     var author = comment.qq ? store.users[comment.qq] : null;
     var name = comment.anonymous
-      ? "匿名"
+      ? "无名调查员"
       : comment.name || (author ? displayName(author) : "用户");
     if (comment.judge && !comment.anonymous) {
       name = (author ? displayName(author) : name) + "（评委）";
     }
     head.appendChild(el("span", "comment-name", name));
+    if (comment.judge) head.classList.add("is-judge");
     head.appendChild(
       el("span", null, formatTime(comment.t) + (comment.editedAt ? "（已编辑）" : "")),
     );
@@ -8069,6 +8092,118 @@
     return panel;
   }
 
+  function appendResultsRanking(parent, table, title, wrapper) {
+    var labels = Array.from(table.querySelectorAll("thead th")).map(function (cell) { return cell.textContent; });
+    Array.from(table.querySelectorAll("tbody tr")).forEach(function (row) {
+      Array.from(row.cells).forEach(function (cell, index) { cell.dataset.label = labels[index] || ""; });
+    });
+    if (title === "全部名次") {
+      var heading = el("div", "results-section-heading");
+      heading.appendChild(el("span", "results-section-number", "02"));
+      heading.appendChild(el("h2", "panel-title", title));
+      heading.appendChild(el("span", "results-section-caption", "按综合均分排列"));
+      parent.appendChild(heading);
+    } else {
+      parent.appendChild(el("h2", "panel-title results-rank-title", title));
+    }
+    var rows = table.querySelectorAll("tbody tr");
+    if (rows.length > 20) {
+      table.classList.add("rank-table-collapsed");
+      var showAll = el("button", "btn-ghost results-show-all", "查看全部 " + rows.length + " 篇");
+      showAll.type = "button";
+      showAll.addEventListener("click", function () {
+        table.classList.remove("rank-table-collapsed");
+        showAll.remove();
+      });
+      parent.appendChild(wrapper || table);
+      parent.appendChild(showAll);
+    } else {
+      parent.appendChild(wrapper || table);
+    }
+  }
+
+  function appendResultsDistributions(parent, list) {
+    if (!list.childElementCount) return;
+    var section = el("details", "results-distributions");
+    section.appendChild(el("summary", null, "查看各作品评分分布"));
+    section.appendChild(el("p", "results-distribution-note", "颜色对应 1–5 分；各色条段的宽度表示该分值所占比例。"));
+    section.appendChild(list);
+    parent.appendChild(section);
+  }
+
+  function renderAwardGallery(parent, edition, entries) {
+    if (!entries.length) return;
+    var heading = el("div", "results-section-heading");
+    heading.appendChild(el("span", "results-section-number", "01"));
+    heading.appendChild(el("h2", "panel-title", "授奖"));
+    heading.appendChild(el("span", "results-section-caption", "AWARDS · 本卷授奖档案"));
+    parent.appendChild(heading);
+    var gallery = el("div", "award-gallery");
+    entries.forEach(function (entry, index) {
+      var featured = index === 0;
+      var card = el("article", "award-card" + (featured ? " award-card-featured" : ""));
+      var main = el("div", "award-card-main");
+      var cardHead = el("div", "award-card-head");
+      cardHead.appendChild(el("span", null, "幻梦境档案馆 · 授奖卡"));
+      cardHead.appendChild(el("span", null, "No. " + edition.year + " / " + String(entry.work ? entry.work.no : index + 1).padStart(3, "0")));
+      main.appendChild(cardHead);
+      main.appendChild(el("p", "award-card-name", entry.award));
+      var title = el("h3", "award-card-title");
+      if (entry.work) {
+        var link = el("a", null, entry.title);
+        link.href = "#/" + edition.slug + "/" + encodeURIComponent(entry.work.slug);
+        title.appendChild(link);
+      } else {
+        title.textContent = entry.title;
+      }
+      main.appendChild(title);
+      main.appendChild(el("p", "award-card-author", "作者 " + (entry.author || "匿名")));
+      if (entry.dimensions && entry.dimensions.length) {
+        main.appendChild(el("p", "award-card-dimensions", entry.dimensions.map(function (dim) {
+          return dim.label + " " + (Number.isFinite(Number(dim.average)) ? Number(dim.average).toFixed(2) : "—");
+        }).join(" · ")));
+      }
+      if (entry.review) {
+        main.appendChild(el("blockquote", "award-card-quote", String(entry.review).replace(/\s+/g, " ").slice(0, featured ? 165 : 85) + (entry.review.length > (featured ? 165 : 85) ? "…" : "")));
+      }
+      var footer = el("div", "award-card-footer");
+      if (entry.work) {
+        var read = el("a", featured ? "btn" : "btn-ghost", "阅读获奖作品 →");
+        read.href = "#/" + edition.slug + "/" + encodeURIComponent(entry.work.slug);
+        footer.appendChild(read);
+      }
+      if (entry.review) {
+        var reviewDetails = el("details", "award-card-review-details");
+        reviewDetails.appendChild(el("summary", null, "全部评语"));
+        appendHistoricalReviewText(reviewDetails, entry.review);
+        footer.appendChild(reviewDetails);
+      }
+      if (entry.work) {
+        var shareAward = el("button", "btn-ghost award-card-share", "生成授奖卡");
+        shareAward.type = "button";
+        shareAward.addEventListener("click", function () { openShareCardModal(edition, entry.work, "", entry); });
+        footer.appendChild(shareAward);
+      }
+      main.appendChild(footer);
+      card.appendChild(main);
+      if (featured) {
+        var aside = el("div", "award-card-aside");
+        aside.appendChild(el("span", "award-card-stamp", "授奖\n档案"));
+        if (entry.rank) {
+          aside.appendChild(el("strong", "award-card-rank", String(entry.rank)));
+          aside.appendChild(el("span", "award-card-rank-label", "最终名次"));
+        }
+        if (entry.overall != null && Number.isFinite(Number(entry.overall))) {
+          aside.appendChild(el("span", "award-card-overall", Number(entry.overall).toFixed(2)));
+          aside.appendChild(el("span", "award-card-rank-label", "综合均分"));
+        }
+        card.appendChild(aside);
+      }
+      gallery.appendChild(card);
+    });
+    parent.appendChild(gallery);
+  }
+
   function renderHistoricalResults(edition, publication) {
     var rankings = publication.rankings || [];
     var reviews = historicalReviewsOf(edition);
@@ -8100,8 +8235,16 @@
     });
     sheet.appendChild(summary);
 
-    sheet.appendChild(el("h2", "panel-title results-rank-title", "最终排名"));
-    sheet.appendChild(el("p", "historical-scroll-hint", "左右滑动排名表，可查看分数和奖项。"));
+    var awardedRows = rankings.filter(function (row) { return row.award; });
+    renderAwardGallery(sheet, edition, awardedRows.map(function (row) {
+      var review = reviews.filter(function (item) { return item.workSlug === row.workSlug; })[0];
+      return {
+        award: row.award, title: row.title, author: row.author,
+        work: row.workSlug && worksBySlug[row.workSlug], rank: row.rank,
+        overall: row.overall, dimensions: row.dimensions || [], review: review && review.body,
+      };
+    }));
+
     var tableWrap = el("div", "historical-rank-scroll");
     var table = el("table", "rank-table historical-rank-table");
     var headRow = el("tr");
@@ -8130,11 +8273,15 @@
       } else {
         titleCell.appendChild(el("span", "historical-unlinked-title", row.title));
       }
+      if (row.award) titleCell.appendChild(el("span", "rank-list-award", row.award));
       tr.appendChild(titleCell);
       tr.appendChild(el("td", "rank-author-cell", row.author || "未见署名"));
       dimensionLabels.forEach(function (label) {
         var dim = (row.dimensions || []).filter(function (item) { return item.label === label; })[0];
-        tr.appendChild(el("td", "rank-score-cell", dim && dim.average != null && Number.isFinite(Number(dim.average)) ? Number(dim.average).toFixed(2) : "—"));
+        var dimScore = dim && dim.average != null && Number.isFinite(Number(dim.average)) ? Number(dim.average) : null;
+        var dimCell = el("td", "rank-score-cell", dimScore == null ? "—" : dimScore.toFixed(2));
+        if (dimScore != null) dimCell.style.setProperty("--score-pct", Math.max(0, Math.min(100, dimScore * 20)) + "%");
+        tr.appendChild(dimCell);
       });
       tr.appendChild(el("td", "rank-score-cell", row.overall != null && Number.isFinite(Number(row.overall)) ? Number(row.overall).toFixed(2) : "—"));
       tr.appendChild(el("td", "historical-award-cell", row.award || "—"));
@@ -8142,7 +8289,7 @@
     });
     table.appendChild(tbody);
     tableWrap.appendChild(table);
-    sheet.appendChild(tableWrap);
+    appendResultsRanking(sheet, table, "全部名次", tableWrap);
 
     if (reviews.length) {
       sheet.appendChild(el("h2", "panel-title historical-reviews-title", "评委评语"));
@@ -8255,7 +8402,7 @@
       }
       resultsDeadlineMeta.textContent = "截止 " + resultsDeadlineText;
     }
-    resultsHeadAside.appendChild(resultsPhaseChip);
+    if (!officialResults) resultsHeadAside.appendChild(resultsPhaseChip);
     var resultsMark = el(
       "div",
       "results-status-mark" + (officialResults ? " is-official" : ""),
@@ -8269,7 +8416,7 @@
     resultsHead.appendChild(resultsHeadAside);
     sheet.appendChild(resultsHead);
     var resultIntro = officialResults
-      ? "结果公示。下列为综合均分排名与分数分布。"
+      ? "本卷奖项与最终排名已归档。"
       : "本届尚未发布固定结果。管理员可在管理面板双人确认推进阶段；下列为当前实时数据预览。";
     if (awardResult && awardResult.published && officialResults) {
       resultIntro += awardResult.authorRevealRankLimit
@@ -8287,14 +8434,15 @@
       resultSummary.appendChild(item);
     }
     addResultSummary("收录", edition.works.length + " 篇");
-    addResultSummary(
-      "当前阶段",
-      isArchivedEdition(edition) ? "已封存" : phaseLabel(phaseOf(edition.slug)),
-    );
-    addResultSummary("页面状态", officialResults ? "正式公示" : "实时预览");
+    if (officialResults) {
+      addResultSummary("评委特别奖", (awardResult.specialAwards || []).length + " 项");
+    } else {
+      addResultSummary("当前阶段", isArchivedEdition(edition) ? "已封存" : phaseLabel(phaseOf(edition.slug)));
+    }
     sheet.appendChild(resultSummary);
 
     var insight = cloudInsights[edition.slug] || null;
+    if (officialResults) renderSpecialAwardsSection(sheet, edition, awardResult);
     function appendRankCell(tr, rankValue) {
       var rankNumber = Number(rankValue);
       var rankCell = el("td", "rank-cell");
@@ -8310,8 +8458,8 @@
       if (
         !officialResults ||
         !awardResult ||
-        !Array.isArray(awardResult.awardedWorkIds) ||
-        awardResult.awardedWorkIds.indexOf(workIdValue) === -1
+        !Array.isArray(awardResult.specialAwards) ||
+        !awardResult.specialAwards.some(function (award) { return award.workId === workIdValue; })
       ) {
         return;
       }
@@ -8363,6 +8511,7 @@
         sheet.appendChild(el("p", "intro-text", "本届排名将在统计阶段或结果公示阶段开放。"));
       } else {
         var publicTable = el("table", "rank-table");
+        if (officialResults) publicTable.classList.add("official-rank-table");
         var publicHead = el("thead");
         var publicHeadRow = el("tr");
         var publicColumns = ["名次", "编号", "标题"];
@@ -8402,10 +8551,8 @@
           publicBody.appendChild(tr);
         });
         publicTable.appendChild(publicBody);
-        sheet.appendChild(el("h2", "panel-title results-rank-title", "综合均分排名"));
-        sheet.appendChild(publicTable);
+        appendResultsRanking(sheet, publicTable, officialResults ? "全部名次" : "综合均分排名");
       }
-      renderSpecialAwardsSection(sheet, edition, awardResult);
       if (insight && insight.distributions) {
         var publicDistributionRows = el("div", "result-distribution-list");
         (insight.leaderboard || []).forEach(function (row) {
@@ -8422,13 +8569,7 @@
           );
           if (details) publicDistributionRows.appendChild(details);
         });
-        if (publicDistributionRows.childElementCount) {
-          sheet.appendChild(el("h2", "panel-title results-distribution-title", "作品评分分布"));
-          sheet.appendChild(
-            el("p", "results-distribution-note", "颜色对应 1–5 分；各色条段的宽度表示该分值所占比例。"),
-          );
-          sheet.appendChild(publicDistributionRows);
-        }
+        appendResultsDistributions(sheet, publicDistributionRows);
       }
       refs.content.appendChild(sheet);
       window.scrollTo(0, 0);
@@ -8513,9 +8654,7 @@
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
-    sheet.appendChild(el("h2", "panel-title results-rank-title", "综合均分排名"));
-    sheet.appendChild(table);
-    renderSpecialAwardsSection(sheet, edition, awardResult);
+    appendResultsRanking(sheet, table, officialResults ? "全部名次" : "综合均分排名");
 
     var distributionList = el("div", "result-distribution-list");
     ranked.forEach(function (row, index) {
@@ -8533,13 +8672,7 @@
       );
       if (details) distributionList.appendChild(details);
     });
-    if (distributionList.childElementCount) {
-      sheet.appendChild(el("h2", "panel-title results-distribution-title", "作品评分分布"));
-      sheet.appendChild(
-        el("p", "results-distribution-note", "颜色对应 1–5 分；各色条段的宽度表示该分值所占比例。"),
-      );
-      sheet.appendChild(distributionList);
-    }
+    appendResultsDistributions(sheet, distributionList);
 
     refs.content.appendChild(sheet);
     window.scrollTo(0, 0);
@@ -8551,50 +8684,19 @@
       return award && award.name && award.workId;
     });
     if (!awards.length) return;
-    parent.appendChild(el("h2", "panel-title special-awards-title", "评委特别奖"));
-    parent.appendChild(
-      el("p", "rate-hint special-awards-intro", "由评委提名的独立奖项 · 作品与评语于本届公示阶段开放"),
-    );
-    var list = el("div", "special-awards-list");
-    awards.forEach(function (award) {
+    var leaderboard = (cloudInsights[edition.slug] || {}).leaderboard || [];
+    renderAwardGallery(parent, edition, awards.map(function (award) {
       var work = (edition.works || []).filter(function (item) {
         return workId(edition.slug, item.slug) === award.workId;
       })[0];
-      if (!work) return;
-      var card = el("article", "special-award-item");
-      card.appendChild(el("p", "special-award-name", award.name));
-      var workLink = el("button", "linkish special-award-work", work.title);
-      workLink.type = "button";
-      workLink.addEventListener("click", function () {
-        location.hash = "#/" + edition.slug + "/" + encodeURIComponent(work.slug);
-      });
-      card.appendChild(workLink);
-      var author = (result.authorReveals || {})[award.workId] || "匿名";
-      card.appendChild(el("p", "special-award-author", author));
-      if (award.excerpt) {
-        var excerpt = el("blockquote", "special-award-excerpt");
-        excerpt.textContent = String(award.excerpt);
-        card.appendChild(excerpt);
-      }
-      if (award.review) {
-        var details = el("details", "special-award-review");
-        details.appendChild(el("summary", null, "阅读评委评语"));
-        var review = el("div", "special-award-review-body");
-        String(award.review)
-          .split(/\n\s*\n/)
-          .map(function (paragraph) { return paragraph.trim(); })
-          .filter(Boolean)
-          .forEach(function (paragraph) {
-            review.appendChild(el("p", null, paragraph));
-          });
-        details.appendChild(review);
-        card.appendChild(details);
-      } else {
-        card.appendChild(el("p", "special-award-review-pending", "评委评语整理中。"));
-      }
-      list.appendChild(card);
-    });
-    if (list.childElementCount) parent.appendChild(list);
+      var ranking = leaderboard.filter(function (row) { return row.workId === award.workId; })[0];
+      return {
+        award: award.name, title: work ? work.title : "档案待补录", work: work,
+        author: (result.authorReveals || {})[award.workId] || "匿名",
+        review: award.review || award.excerpt || "", rank: ranking && ranking.rank,
+        overall: ranking && ranking.totalAvg,
+      };
+    }).filter(function (entry) { return !!entry.work; }));
   }
 
   function renderPieBlock(label, bins) {
@@ -9474,7 +9576,7 @@
     return lines.length * lineHeight;
   }
 
-  function drawShareCard(canvas, edition, work, quote) {
+  function drawShareCard(canvas, edition, work, quote, award) {
     canvas.width = 1200;
     canvas.height = 630;
     var context = canvas.getContext("2d");
@@ -9516,6 +9618,41 @@
         context.lineTo(1120, 126);
         context.stroke();
 
+        if (award && work) {
+          context.textAlign = "left";
+          context.fillStyle = palette.volume;
+          context.font = "700 17px " + palette.sans;
+          context.fillText("授奖档案 · " + award.award, 88, 174);
+          context.font = "600 48px " + palette.serif;
+          var awardTitleHeight = drawShareText(context, work.title, 88, 246, 790, 2, 62);
+          context.fillStyle = palette.muted;
+          context.font = "20px " + palette.serif;
+          context.fillText("作者 " + (award.author || "匿名"), 90, 270 + awardTitleHeight);
+          context.fillStyle = palette.text;
+          context.font = "22px " + palette.serif;
+          drawShareText(context, String(award.review || "").replace(/\s+/g, " "), 110, 310 + awardTitleHeight, 900, 3, 34);
+          context.strokeStyle = palette.volume;
+          context.strokeRect(974, 165, 125, 125);
+          context.fillStyle = palette.volume;
+          context.textAlign = "center";
+          context.font = "700 31px " + palette.serif;
+          context.fillText("授奖", 1036, 218);
+          context.fillText("档案", 1036, 260);
+          context.textAlign = "left";
+          context.strokeStyle = palette.line;
+          context.beginPath();
+          context.moveTo(88, 516);
+          context.lineTo(1110, 516);
+          context.stroke();
+          context.fillStyle = palette.text;
+          context.font = "17px " + palette.serif;
+          context.fillText((award.rank ? "名次 " + award.rank + " · " : "") + (award.overall != null ? "综合 " + Number(award.overall).toFixed(2) : ""), 90, 550);
+          context.textAlign = "right";
+          context.fillStyle = palette.muted;
+          context.font = "14px " + palette.sans;
+          context.fillText(urlLabel, 1110, 550);
+          return;
+        }
         if (work) {
           context.textAlign = "left";
           context.fillStyle = palette.volume;
@@ -9595,19 +9732,19 @@
       });
   }
 
-  function openShareCardModal(edition, work, quote) {
+  function openShareCardModal(edition, work, quote, award) {
     var body = el("div", "modal-body share-card-modal");
     body.appendChild(
       el(
         "p",
         "modal-meta",
-        work ? "卡片只包含你选中的摘句、档号和作品名；评分期间不显示作者。" : "按本卷卷色与原有卷徽生成 1200 × 630 分享图。",
+        award ? "按正式公示的奖项、作者和评语生成 1200 × 630 授奖卡。" : work ? "卡片只包含你选中的摘句、档号和作品名；评分期间不显示作者。" : "按本卷卷色与原有卷徽生成 1200 × 630 分享图。",
       ),
     );
     var canvas = document.createElement("canvas");
     canvas.className = "share-card-canvas";
     canvas.setAttribute("role", "img");
-    canvas.setAttribute("aria-label", work ? "作品摘句分享卡片预览" : "本卷分享卡片预览");
+    canvas.setAttribute("aria-label", award ? "授奖卡片预览" : work ? "作品摘句分享卡片预览" : "本卷分享卡片预览");
     body.appendChild(canvas);
     var status = el("p", "share-card-status", "正在生成分享图…");
     status.setAttribute("aria-live", "polite");
@@ -9625,7 +9762,7 @@
         }
         var objectUrl = URL.createObjectURL(blob);
         var link = document.createElement("a");
-        var suffix = work
+        var suffix = award ? edition.year + "-" + displayWorkNo(work) + "-授奖" : work
           ? edition.year + "-" + displayWorkNo(work) + "-摘句"
           : edition.year + "-档案卷";
         link.href = objectUrl;
@@ -9650,10 +9787,10 @@
     actions.appendChild(copyLink);
     body.appendChild(actions);
 
-    openModal(work ? "生成摘句卡片" : "分享本卷", body);
+    openModal(award ? "生成授奖卡" : work ? "生成摘句卡片" : "分享本卷", body);
     var dialog = refs.modalRoot.querySelector(".modal-dialog");
     if (dialog) dialog.classList.add("share-card-dialog");
-    drawShareCard(canvas, edition, work, quote).then(function () {
+    drawShareCard(canvas, edition, work, quote, award).then(function () {
       download.disabled = false;
       status.textContent = "分享图已就绪 · PNG 1200 × 630";
     }).catch(function (err) {
@@ -10729,6 +10866,7 @@
     }
 
     var toolbar = el("div", "reading-shelf-toolbar");
+    var filterRow = el("div", "reading-shelf-filters");
     var filters = [
       ["all", "全部"],
       ["in-progress", "在读"],
@@ -10746,8 +10884,9 @@
         readingShelfFilter = filter[0];
         renderReadingShelf(true);
       });
-      toolbar.appendChild(button);
+      filterRow.appendChild(button);
     });
+    toolbar.appendChild(filterRow);
     var controls = el("div", "reading-shelf-actions");
     if (USE_CLOUD && user) {
       var refreshShelf = el("button", "btn-ghost btn-tiny", "同步记录");
@@ -10906,6 +11045,13 @@
     state.editionSlug = edition.slug;
     state.workSlug = "";
     refs.editionSelect.value = edition.slug;
+    if (USE_CLOUD && isPublicPhase(edition.slug) && !cloudAwardsLoaded[edition.slug]) {
+      loadCloudEditionAwards(edition.slug).then(function () {
+        if (state.view === "home") renderHome();
+      }).catch(function () {
+        cloudAwardsLoaded[edition.slug] = true;
+      });
+    }
     var info = volumeInfo(edition);
     var st = editionState(edition.slug);
     var shell = el("div", "home-shell");
@@ -10957,7 +11103,12 @@
       colophon.appendChild(cell);
     }
     addColophon("收录", edition.works.length + " 篇");
-    addColophon("截止", due ? formatShortDate(due) : "阶段进行中");
+    var homeAwards = isPublicPhase(edition.slug) ? editionAwardsData(edition.slug) : null;
+    if (isPublicPhase(edition.slug)) {
+      addColophon("公示", homeAwards && homeAwards.publication && homeAwards.publication.publishedAt
+        ? formatShortDate(homeAwards.publication.publishedAt) : "正式公示");
+      if (homeAwards && homeAwards.published) addColophon("奖项", (homeAwards.specialAwards || []).length + " 项", true);
+    } else if (due) addColophon("截止", formatShortDate(due));
     var homeProgress = ratingProgressAvailable(edition) ? ratingProgressData(edition) : null;
     if (homeProgress && homeProgress.status === "loaded") {
       addColophon(
@@ -10965,8 +11116,8 @@
         "已评 " + homeProgress.ratedCount + " / " + homeProgress.eligibleWorkCount,
         true,
       );
-    } else {
-      addColophon("距截止", due ? formatCountdown(due) : "—", true);
+    } else if (due && !isPublicPhase(edition.slug)) {
+      addColophon("距截止", formatCountdown(due), true);
     }
     heroMain.appendChild(colophon);
     hero.appendChild(heroMain);
@@ -10980,7 +11131,7 @@
     heroState.setAttribute("aria-label", "本卷进度与入口");
     var phaseLine = el("div", "home-phase-line");
     phaseLine.appendChild(el("span", null, "● " + editionStatusLabel(edition)));
-    phaseLine.appendChild(el("span", null, due ? formatShortDate(due) + " 截止" : "阶段进行中"));
+    if (due) phaseLine.appendChild(el("span", null, formatShortDate(due) + " 截止"));
     heroState.appendChild(phaseLine);
     var timeline = renderPhaseTimeline(edition.slug);
     if (timeline) heroState.appendChild(timeline);
@@ -10996,6 +11147,30 @@
         ),
       );
       heroState.appendChild(resultsNotice);
+    }
+    if (isPublicPhase(edition.slug)) {
+      var publishedNotice = el("aside", "home-results-notice home-results-published");
+      publishedNotice.appendChild(el("span", "home-results-notice-label", "本卷获奖 · 结果已公示"));
+      var homeAwardEntries = homeAwards && homeAwards.published ? (homeAwards.specialAwards || []) : [];
+      if (homeAwardEntries.length) {
+        var homeAwardList = el("div", "home-award-list");
+        homeAwardEntries.slice(0, 4).forEach(function (award) {
+          var awardWork = (edition.works || []).filter(function (work) { return workId(edition.slug, work.slug) === award.workId; })[0];
+          if (!awardWork) return;
+          var item = el("a", "home-award-item");
+          item.href = "#/" + edition.slug + "/" + encodeURIComponent(awardWork.slug);
+          item.appendChild(el("span", null, award.name));
+          item.appendChild(el("strong", null, awardWork.title));
+          homeAwardList.appendChild(item);
+        });
+        publishedNotice.appendChild(homeAwardList);
+      } else {
+        publishedNotice.appendChild(el("p", null, "翻开本卷授奖与全部名次。"));
+      }
+      var publishedLink = el("a", "btn home-results-link", "阅读结果公报 →");
+      publishedLink.href = "#/" + edition.slug + "/__results";
+      publishedNotice.appendChild(publishedLink);
+      heroState.appendChild(publishedNotice);
     }
     var actions = el("div", "home-phase-actions");
     var shareVolume = el("button", "btn-ghost home-volume-share");
@@ -11638,7 +11813,43 @@
 
       cardBody.appendChild(el("h1", "work-title", work.title));
 
+      var historicalRanking = historicalResultsOf(edition);
+      var historicalAward = historicalRanking && (historicalRanking.rankings || []).filter(function (row) {
+        return row.workSlug === work.slug && row.award;
+      })[0];
+      var publicAwardData = isPublicPhase(edition.slug) ? editionAwardsData(edition.slug) : null;
+      var currentAward = publicAwardData && publicAwardData.published && (publicAwardData.specialAwards || []).filter(function (award) {
+        return award.workId === id;
+      })[0];
+      var currentRanking = currentAward && ((cloudInsights[edition.slug] || {}).leaderboard || []).filter(function (row) {
+        return row.workId === id;
+      })[0];
+      if (historicalAward || currentAward) {
+        cardBody.appendChild(el("p", "work-award-seal", "授奖 · " + (historicalAward ? historicalAward.award : currentAward.name)));
+        if ((historicalAward && historicalAward.rank) || currentRanking) {
+          var rank = historicalAward ? historicalAward.rank : currentRanking.rank;
+          var total = historicalAward ? historicalRanking.rankings.length : ((cloudInsights[edition.slug] || {}).leaderboard || []).length;
+          var score = historicalAward ? historicalAward.overall : currentRanking.totalAvg;
+          cardBody.appendChild(el("p", "work-award-rank", "名次 " + rank + " / " + total + (score != null ? " · 综合 " + Number(score).toFixed(2) : "")));
+        }
+      }
+
       var revealedAuthor = revealedAuthorName(edition.slug, id);
+      if (historicalAward || currentAward) {
+        var awardShare = el("button", "btn-ghost work-award-share", "生成授奖卡");
+        awardShare.type = "button";
+        awardShare.addEventListener("click", function () {
+          var oldReview = historicalAward && reviewsForHistoricalWork(edition, work)[0];
+          openShareCardModal(edition, work, "", {
+            award: historicalAward ? historicalAward.award : currentAward.name,
+            author: revealedAuthor || work.author || "匿名",
+            review: historicalAward ? oldReview && oldReview.body : currentAward.review,
+            rank: historicalAward ? historicalAward.rank : currentRanking && currentRanking.rank,
+            overall: historicalAward ? historicalAward.overall : currentRanking && currentRanking.totalAvg,
+          });
+        });
+        cardBody.appendChild(awardShare);
+      }
       var anonymous = isAnonymousAuthor(work) && !revealedAuthor;
       var cardFields = el("div", "work-card-fields");
       var cardChars = contentOverride ? charsFromHtml(contentOverride.html) : work.chars;
@@ -11688,8 +11899,8 @@
         var wasAwarded =
           publicAwards &&
           publicAwards.published &&
-          Array.isArray(publicAwards.awardedWorkIds) &&
-          publicAwards.awardedWorkIds.indexOf(id) !== -1;
+          Array.isArray(publicAwards.specialAwards) &&
+          publicAwards.specialAwards.some(function (award) { return award.workId === id; });
         metaDetailsBody.appendChild(
           el(
             "p",
@@ -11813,13 +12024,13 @@
 
       var body = el("div", "work-body" + (id === "2026/34-沃多在哪里？" ? " work-no-indent" : ""));
       if (contentOverride && contentOverride.html) {
-        body.innerHTML = contentOverride.html;
+        body.innerHTML = safeWorkHtml(contentOverride.html);
       } else if (USE_CLOUD) {
         body.appendChild(
           el("p", "work-body-loading", "正在从档案库调取正文…"),
         );
       } else {
-        body.innerHTML = work.html || "";
+        body.innerHTML = safeWorkHtml(work.html);
       }
       var readerSettings = loadReadingSettings();
       var settingsPanel = el("div", "modal-body reading-settings-modal");
@@ -11886,6 +12097,12 @@
       sheet.appendChild(renderWorkEndMark(edition, work, contentOverride));
       var historicalReviews = renderHistoricalWorkReviews(edition, work);
       if (historicalReviews) sheet.appendChild(historicalReviews);
+      if (currentAward && currentAward.review) {
+        var awardReview = el("section", "panel historical-work-reviews");
+        awardReview.appendChild(el("h2", "panel-title", "评委评语 · " + currentAward.name));
+        appendHistoricalReviewText(awardReview, currentAward.review);
+        sheet.appendChild(awardReview);
+      }
       var authorNote = renderAuthorNotePanel(id, work);
       if (authorNote) sheet.appendChild(authorNote);
       sheet.appendChild(renderRatingSectionDivider());
@@ -11959,7 +12176,7 @@
         state.editionSlug === edition.slug && state.workSlug === work.slug
       );
     };
-    if (isPublicPhase(edition.slug) && isAnonymousAuthor(work) && !cloudAwardsLoaded[edition.slug]) {
+    if (isPublicPhase(edition.slug) && !cloudAwardsLoaded[edition.slug]) {
       loadCloudEditionAwards(edition.slug)
         .then(function () {
           if (stillHere()) paint(true);
@@ -11967,6 +12184,11 @@
         .catch(function (e) {
           console.error(e);
         });
+    }
+    if (isPublicPhase(edition.slug) && !cloudInsightsLoaded[edition.slug]) {
+      loadCloudEditionInsights(edition.slug).then(function () {
+        if (stillHere()) paint(true);
+      }).catch(function (e) { console.error(e); });
     }
     if ((isArchivedEdition(edition) || (cloudUnavailable && isStaticPublicEdition(edition))) && !cloudContent[id]) {
       loadStaticWorkContent(id)
@@ -12134,6 +12356,33 @@
     document.title = title ? title + " | 幻梦境档案馆" : "幻梦境档案馆";
   }
 
+  function renderMissingArchive() {
+    state.view = "missing";
+    state.workSlug = "";
+    setDocumentTitle(["查无此档"]);
+    setLayoutMode("results");
+    document.body.dataset.view = "missing";
+    hideHud();
+    clear(refs.content);
+    var sheet = el("section", "sheet results-sheet missing-archive");
+    sheet.appendChild(el("p", "results-kicker", "幻梦境档案馆 · 馆藏检索"));
+    sheet.appendChild(el("span", "missing-archive-stamp", "查无此档"));
+    sheet.appendChild(el("h1", "results-title", "此档案不在馆藏中"));
+    sheet.appendChild(el("p", "intro-text", "档案馆里没有这份记录。至少醒着的时候没有。可以搜索标题，或回到本卷目录。"));
+    var actions = el("div", "missing-archive-actions");
+    var search = el("button", "btn", "搜索全馆");
+    search.type = "button";
+    search.addEventListener("click", openGlobalSearchPanel);
+    actions.appendChild(search);
+    var home = el("a", "btn-ghost", "回首页");
+    home.href = "#/";
+    actions.appendChild(home);
+    sheet.appendChild(actions);
+    refs.content.appendChild(sheet);
+    window.scrollTo(0, 0);
+    updateWitchContext();
+  }
+
   function route() {
     state.refreshEditionList = null;
     refreshChrome();
@@ -12168,12 +12417,9 @@
       return;
     }
 
-    var edition =
-      findEdition(editionSlug) || findEdition(state.editionSlug) || editions[0];
+    var edition = findEdition(editionSlug);
     if (!edition) {
-      clear(refs.content);
-      refs.content.appendChild(el("p", "toc-empty", "没有可显示的内容。"));
-      updateWitchContext();
+      renderMissingArchive();
       return;
     }
 
@@ -12188,7 +12434,7 @@
       state.workSlug = "";
       if (state.view !== "results") applySidebarCollapsed(true);
       state.view = "results";
-      setDocumentTitle([historicalResultsOf(edition) ? "结果公报" : "投票公示", edition.shortName]);
+      setDocumentTitle([historicalResultsOf(edition) || isPublicPhase(edition.slug) ? "结果公报" : "投票统计", edition.shortName]);
       setLayoutMode("results");
       renderToc();
       renderResults(edition);
@@ -12206,6 +12452,8 @@
       renderToc();
       renderWork(edition, work);
       updateWitchContext();
+    } else if (workSlug) {
+      renderMissingArchive();
     } else {
       state.view = "edition";
       window.scrollTo(0, 0);
