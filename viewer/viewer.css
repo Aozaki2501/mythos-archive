@@ -3600,27 +3600,46 @@ textarea:focus-visible,
   font-variant-numeric: tabular-nums;
 }
 
+/* 结果公报印章：原型（气氛审查 p4）是「正式公示」圆章 —— 双圈、不倾斜，
+   第三行小字是「年份 · 公报」。方印留给授奖卡上的「授奖 · 档案」（.award-card-stamp）。 */
 .results-status-mark {
-  display: grid;
-  width: 88px;
-  height: 88px;
-  place-items: center;
-  padding: 8px 6px;
-  border: 2px solid var(--accent);
-  border-radius: var(--radius);
+  display: flex;
+  width: 96px;
+  height: 96px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  border: 3px solid var(--accent);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 3px var(--bg), inset 0 0 0 4px var(--accent);
   color: var(--accent);
   font-family: var(--display-font);
-  font-size: 19px;
+  font-size: 18px;
   font-weight: 700;
-  line-height: 1.1;
+  line-height: 1.12;
   letter-spacing: 0.06em;
   text-align: center;
-  white-space: pre-line;
-  transform: rotate(-6deg);
 }
 
-.results-status-mark.is-official {
-  box-shadow: inset 0 0 0 1px var(--bg), inset 0 0 0 3px var(--accent);
+.results-status-mark-main {
+  display: block;
+  white-space: pre-line;
+}
+
+.results-status-mark-year {
+  display: block;
+  font-family: var(--archive-number-font);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  opacity: 0.85;
+}
+
+/* 未定稿时外圈走虚线，和正式章区分开 */
+.results-status-mark:not(.is-official) {
+  border-style: dashed;
 }
 
 .results-intro {
@@ -8594,9 +8613,15 @@ html[data-theme="dark"] .archive-volume-row:hover .archive-volume-year { color: 
   }
 
   .results-status-mark {
-    width: 72px;
-    height: 72px;
-    font-size: 16px;
+    width: 78px;
+    height: 78px;
+    border-width: 2px;
+    box-shadow: inset 0 0 0 3px var(--bg), inset 0 0 0 4px var(--accent);
+    font-size: 15px;
+  }
+
+  .results-status-mark-year {
+    font-size: 8px;
   }
 
   .results-summary {
@@ -9365,6 +9390,12 @@ html.is-dream-gate .boot-splash {
 .award-card-rank-label { color: var(--muted); font-size: 11px; }
 .award-card-overall { margin-top: 14px; color: var(--text); font-family: var(--archive-number-font); font-size: 22px; }
 .rank-list-award { display: none; margin-left: 6px; padding: 1px 4px; border: 1px solid var(--accent); color: var(--accent); font-size: 10px; vertical-align: middle; }
+/* 历届名次行的两项维度只给颜色条、不给数字，所以配一条图例说明颜色含义 */
+.rank-dim-legend { display: flex; gap: 18px; margin: -4px 0 12px; color: var(--muted); font-size: 12px; }
+.rank-dim-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.rank-dim-legend-swatch { display: inline-block; width: 22px; height: 3px; }
+.rank-dim-legend-swatch.is-dim-first { background: #397d70; }
+.rank-dim-legend-swatch.is-dim-second { background: var(--accent); }
 .result-work-distribution-summary { justify-content: flex-start; }
 .result-work-distribution-meta { margin-left: auto; }
 .witch-portrait { mask-image: linear-gradient(to bottom, #000 86%, transparent); }
@@ -9384,16 +9415,24 @@ html.is-dream-gate .boot-splash {
   .historical-rank-scroll { overflow: visible; }
   .historical-rank-table { display: block; width: 100%; min-width: 0; border-top: 0; }
   .historical-rank-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
-  .historical-rank-table tbody { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 20px; }
-  .historical-rank-table tr { display: grid; grid-template-columns: 30px minmax(0, 1fr) 70px 46px; grid-template-rows: auto auto; align-items: center; gap: 1px 8px; min-width: 0; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .historical-rank-table tbody { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 26px; }
+  /* 每行：名次 · 标题/作者 · 两项维度小条 · 综合分。
+     原型（气氛审查 p5）写的是「每行是名次、标题、作者、两项维度小条、综合分」——维度只给条，不排数字。
+     数字仍留在 DOM 里给读屏；要恢复显示，删掉下面 .historical-rank-table td:nth-child(4)/(5) 里的
+     color/font-size 两行即可。 */
+  .historical-rank-table tr { display: grid; grid-template-columns: 32px minmax(0, 1fr) 132px 58px; grid-template-rows: auto auto; align-items: center; gap: 0 14px; min-width: 0; padding: 20px 0; border-bottom: 1px solid var(--line); }
   .historical-rank-table td { min-width: 0; padding: 0; border: 0; }
-  .historical-rank-table td:nth-child(1) { grid-column: 1; grid-row: 1 / 3; color: var(--accent); font-size: 12px; }
+  .historical-rank-table td:nth-child(1) { grid-column: 1; grid-row: 1 / 3; color: var(--accent); font-size: 13px; }
   .historical-rank-table td:nth-child(2) { grid-column: 2; grid-row: 1; display: flex; align-items: center; min-width: 0; }
   .historical-rank-table td:nth-child(3) { grid-column: 2; grid-row: 2; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-  .historical-rank-table td:nth-child(4),.historical-rank-table td:nth-child(5) { padding-bottom: 3px; text-align: right; background-repeat: no-repeat; background-position: left bottom; background-size: 100% 2px; }
-  .historical-rank-table td:nth-child(4) { grid-column: 3; grid-row: 1; background-image: linear-gradient(to right, #397d70 var(--score-pct, 0%), var(--line) var(--score-pct, 0%)); }
-  .historical-rank-table td:nth-child(5) { grid-column: 3; grid-row: 2; background-image: linear-gradient(to right, var(--accent) var(--score-pct, 0%), var(--line) var(--score-pct, 0%)); }
-  .historical-rank-table td:nth-child(6) { grid-column: 4; grid-row: 1 / 3; text-align: right; }
+  /* 两条维度小条紧贴叠放：上面那条贴在标题行底、下面那条贴在作者行顶，row-gap 为 0 时合成一条双色条 */
+  .historical-rank-table td:nth-child(4),
+  .historical-rank-table td:nth-child(5) { align-self: stretch; color: transparent; font-size: 0; background-repeat: no-repeat; background-size: 100% 3px; }
+  .historical-rank-table td:nth-child(4) { grid-column: 3; grid-row: 1; background-position: left bottom; background-image: linear-gradient(to right, #397d70 var(--score-pct, 0%), var(--line) var(--score-pct, 0%)); }
+  .historical-rank-table td:nth-child(5) { grid-column: 3; grid-row: 2; background-position: left top; background-image: linear-gradient(to right, var(--accent) var(--score-pct, 0%), var(--line) var(--score-pct, 0%)); }
+  .historical-rank-table td:nth-child(6) { position: relative; display: flex; grid-column: 4; grid-row: 1 / 3; align-self: stretch; align-items: center; justify-content: flex-end; padding-left: 14px; font-size: 17px; }
+  /* 综合分前面那条短线（原型里只到两条小条那么高，不是整列通高） */
+  .historical-rank-table td:nth-child(6)::before { content: ""; position: absolute; left: 0; top: 50%; width: 1px; height: 22px; margin-top: -11px; background: var(--line-strong); }
   .historical-rank-table td:nth-child(7) { display: none; }
   .historical-rank-table .historical-rank-title { max-width: 100%; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
   .historical-rank-table .rank-list-award { display: inline-block; flex: none; }
@@ -9411,6 +9450,8 @@ html.is-dream-gate .boot-splash {
   .award-card-overall { margin: 0 0 0 auto; }
   .award-card-featured .award-card-title { font-size: 26px; }
   .results-section-caption { display: none; }
+  /* 窄屏名次卡仍然逐格显示分数，图例是多余的 */
+  .rank-dim-legend { display: none; }
   .results-sheet .rank-table,
   .results-sheet .historical-rank-table { display: block; width: 100%; min-width: 0; overflow: visible; white-space: normal; border: 0; }
   .results-sheet .rank-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }

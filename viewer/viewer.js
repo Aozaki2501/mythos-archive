@@ -8125,6 +8125,18 @@
       heading.appendChild(el("h2", "panel-title", title));
       heading.appendChild(el("span", "results-section-caption", "按综合均分排列"));
       parent.appendChild(heading);
+      // 历届名次行的两项维度只给条、不给数字，所以补一条图例说明颜色含义
+      var dimLabels = Array.from(table.querySelectorAll("thead th")).map(function (cell) { return cell.textContent; }).slice(3, 5);
+      if (table.classList.contains("historical-rank-table") && dimLabels.length === 2 && dimLabels[0] && dimLabels[0] !== "综合") {
+        var legend = el("div", "rank-dim-legend");
+        dimLabels.forEach(function (label, index) {
+          var item = el("span", "rank-dim-legend-item");
+          item.appendChild(el("span", "rank-dim-legend-swatch " + (index === 0 ? "is-dim-first" : "is-dim-second")));
+          item.appendChild(el("span", null, label));
+          legend.appendChild(item);
+        });
+        parent.appendChild(legend);
+      }
     } else {
       parent.appendChild(el("h2", "panel-title results-rank-title", title));
     }
@@ -8226,6 +8238,17 @@
     parent.appendChild(gallery);
   }
 
+  // 结果公报印章（原型是「正式公示」圆章）：三行 —— 正式 / 公示 / 年份 · 公报
+  function createResultsStatusMark(official, year) {
+    var mark = el("div", "results-status-mark" + (official ? " is-official" : ""));
+    mark.appendChild(el("span", "results-status-mark-main", official ? "正式\n公示" : "实时\n预览"));
+    if (year) {
+      mark.appendChild(el("span", "results-status-mark-year", year + (official ? " · 公报" : " · 预览")));
+    }
+    mark.setAttribute("aria-label", official ? "正式公示" : "当前为实时数据预览");
+    return mark;
+  }
+
   function renderHistoricalResults(edition, publication) {
     var rankings = publication.rankings || [];
     var reviews = historicalReviewsOf(edition);
@@ -8239,7 +8262,7 @@
     main.appendChild(el("p", "results-edition", edition.shortName));
     head.appendChild(main);
     var aside = el("div", "results-head-aside");
-    aside.appendChild(el("div", "results-status-mark is-official", "正式\n公示"));
+    aside.appendChild(createResultsStatusMark(true, edition.year));
     head.appendChild(aside);
     sheet.appendChild(head);
     sheet.appendChild(el("p", "intro-text results-intro", "按当届最终结果整理。名次和奖项保留原公示口径。"));
@@ -8425,15 +8448,7 @@
       resultsDeadlineMeta.textContent = "截止 " + resultsDeadlineText;
     }
     if (!officialResults) resultsHeadAside.appendChild(resultsPhaseChip);
-    var resultsMark = el(
-      "div",
-      "results-status-mark" + (officialResults ? " is-official" : ""),
-      officialResults ? "正式\n公示" : "实时\n预览",
-    );
-    resultsMark.setAttribute(
-      "aria-label",
-      officialResults ? "正式公示" : "当前为实时数据预览",
-    );
+    var resultsMark = createResultsStatusMark(officialResults, edition.year);
     resultsHeadAside.appendChild(resultsMark);
     resultsHead.appendChild(resultsHeadAside);
     sheet.appendChild(resultsHead);
