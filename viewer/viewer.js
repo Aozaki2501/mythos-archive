@@ -210,10 +210,28 @@
     return seal;
   }
 
+  // 今日聚光印章：每天第一次出现时「盖」一次章
+  var SPOTLIGHT_STAMP_KEY = "mythos.spotlightStamp.v1";
+
+  function spotlightStampIsFresh(date) {
+    try {
+      var today = String(date || "").trim();
+      if (!today) return false;
+      if (window.localStorage.getItem(SPOTLIGHT_STAMP_KEY) === today) return false;
+      window.localStorage.setItem(SPOTLIGHT_STAMP_KEY, today);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
   function createSpotlightSeal(date) {
     var seal = document.createElementNS(SVG_NS, "svg");
     var stampDate = String(date || "").replace(/\./g, "·");
-    seal.setAttribute("class", "seal seal-tilt-l spotlight-date-seal");
+    seal.setAttribute(
+      "class",
+      "seal seal-tilt-l spotlight-date-seal" + (spotlightStampIsFresh(date) ? " is-stamping" : ""),
+    );
     seal.setAttribute("viewBox", "0 0 140 70");
     seal.setAttribute("width", "104");
     seal.setAttribute("height", "52");
@@ -3191,6 +3209,10 @@
       var y = rect.top + rect.height / 2;
       var radius = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
       var transition = document.startViewTransition(function () { applyTheme(next, true); });
+      document.documentElement.classList.add("theme-switching");
+      transition.finished.finally(function () {
+        document.documentElement.classList.remove("theme-switching");
+      });
       transition.ready.then(function () {
         document.documentElement.animate(
           { clipPath: ["circle(0 at " + x + "px " + y + "px)", "circle(" + radius + "px at " + x + "px " + y + "px)"] },
@@ -8217,7 +8239,7 @@
     main.appendChild(el("p", "results-edition", edition.shortName));
     head.appendChild(main);
     var aside = el("div", "results-head-aside");
-    aside.appendChild(el("div", "results-status-mark is-official", "正式公示"));
+    aside.appendChild(el("div", "results-status-mark is-official", "正式\n公示"));
     head.appendChild(aside);
     sheet.appendChild(head);
     sheet.appendChild(el("p", "intro-text results-intro", "按当届最终结果整理。名次和奖项保留原公示口径。"));
@@ -8406,7 +8428,7 @@
     var resultsMark = el(
       "div",
       "results-status-mark" + (officialResults ? " is-official" : ""),
-      officialResults ? "正式公示" : "实时预览",
+      officialResults ? "正式\n公示" : "实时\n预览",
     );
     resultsMark.setAttribute(
       "aria-label",
@@ -11024,6 +11046,35 @@
     }
   }
 
+  // 首页区块：滚动到视口时轻轻上浮渐显，每个区块只播一次；减少动态效果时不做
+  function initHomeReveal() {
+    var targets = refs.content.querySelectorAll(
+      ".home-shell .home-hero, .home-shell .home-state, .home-shell .home-section",
+    );
+    if (!targets.length) return;
+    if (
+      !("IntersectionObserver" in window) ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return;
+    }
+    document.documentElement.classList.add("has-home-reveal");
+    var observer = new IntersectionObserver(
+      function (entries) {
+        entries.forEach(function (entry) {
+          if (!entry.isIntersecting) return;
+          entry.target.classList.add("is-revealed");
+          observer.unobserve(entry.target);
+        });
+      },
+      { rootMargin: "0px 0px -8% 0px", threshold: 0.01 },
+    );
+    Array.prototype.forEach.call(targets, function (target) {
+      target.classList.add("home-reveal");
+      observer.observe(target);
+    });
+  }
+
   function renderHome() {
     stopReadingTracking();
     setQuoteSelectionContext(null);
@@ -11218,6 +11269,7 @@
     footer.appendChild(imprintFoot);
     shell.appendChild(footer);
     refs.content.appendChild(shell);
+    initHomeReveal();
 
     loadSpotlight(edition.slug)
       .then(function (result) {
@@ -12491,7 +12543,17 @@
     renderToc();
   });
 
-  window.addEventListener("hashchange", route);
+  // 页面切换：支持 View Transitions 的浏览器做一个很短的淡入淡出，其余直接切换
+  window.addEventListener("hashchange", function () {
+    if (
+      !document.startViewTransition ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      route();
+      return;
+    }
+    document.startViewTransition(route);
+  });
   window.addEventListener("mythos:white-ship", travelByWhiteShip);
 
   /* ---------- 启动失败与重试 ---------- */
