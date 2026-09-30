@@ -5654,8 +5654,8 @@
         ["comments-asc", "评论数：从少到多"],
         ["ratings-desc", "评分人数：从多到少"],
         ["ratings-asc", "评分人数：从少到多"],
-        ["average-desc", "综合均分：从高到低"],
-        ["average-asc", "综合均分：从低到高"],
+        ["average-desc", "总平均分：从高到低"],
+        ["average-asc", "总平均分：从低到高"],
         ["work-asc", "作品编号：升序"],
         ["work-desc", "作品编号：降序"],
       ].forEach(function (item) {
@@ -5670,7 +5670,7 @@
 
       var table = el("table", "rank-table");
       var head = el("tr");
-      ["作品", "评分", "综合均分", "评论"].forEach(function (label) { head.appendChild(el("th", null, label)); });
+      ["作品", "评分", "总平均分", "评论"].forEach(function (label) { head.appendChild(el("th", null, label)); });
       var thead = el("thead"); thead.appendChild(head); table.appendChild(thead);
       var tbody = el("tbody");
       table.appendChild(tbody); body.appendChild(table);
@@ -8139,6 +8139,11 @@
       : null;
   }
 
+  // 本届有一个评分维度就叫「综合」，排名用的三项总平均不能再叫「综合均分」；历届沿用原公示口径。
+  function overallAverageLabel(edition) {
+    return historicalResultsOf(edition) ? "综合均分" : "三项均分";
+  }
+
   function historicalReviewsOf(edition) {
     return edition && edition.reviews && Array.isArray(edition.reviews.reviews)
       ? edition.reviews.reviews.filter(function (review) { return review && review.body; })
@@ -8215,7 +8220,7 @@
 
   // 公示页「全部名次」：历届与本届共用。rows 为 { rank, title, href, award, author, dims: [数值|null], overall }，
   // dimLabels 与 dims 一一对应（历届两项、本届三项）。电脑上两栏按列排（左 1–10、右 11–20），手机单栏。
-  function renderResultsRankList(parent, rows, dimLabels, caption, sectionNumber) {
+  function renderResultsRankList(parent, rows, dimLabels, caption, sectionNumber, overallLabel) {
     var heading = el("div", "results-section-heading");
     heading.appendChild(el("span", "results-section-number", sectionNumber || "02"));
     heading.appendChild(el("h2", "panel-title", "全部名次"));
@@ -8281,8 +8286,8 @@
       var scoreText = row.overall == null ? "—" : row.overall.toFixed(2);
       var score = el("span", "rank-row-score");
       score.appendChild(el("span", "rank-row-score-value", scoreText));
-      score.appendChild(el("span", "rank-row-score-label", "均分"));
-      score.setAttribute("aria-label", "综合均分 " + scoreText);
+      score.appendChild(el("span", "rank-row-score-label", overallLabel || "均分"));
+      score.setAttribute("aria-label", (overallLabel || "综合均分") + " " + scoreText);
       item.appendChild(score);
       items.push(li);
     });
@@ -8436,7 +8441,7 @@
         }
         if (entry.overall != null && Number.isFinite(Number(entry.overall))) {
           aside.appendChild(el("span", "award-card-overall", Number(entry.overall).toFixed(2)));
-          aside.appendChild(el("span", "award-card-rank-label", "综合均分"));
+          aside.appendChild(el("span", "award-card-rank-label", overallAverageLabel(edition)));
         }
         card.appendChild(aside);
       }
@@ -8779,8 +8784,8 @@
           });
         });
         renderResultsRankList(sheet, officialRows, DIMENSIONS.map(function (dim) { return dim.label; }),
-          officialResults ? "按综合均分排列 · 点击一行展开评分分布与评语" : "按综合均分排列 · 点击一行展开评分人数与分布",
-          officialResults ? "02" : "01");
+          officialResults ? "按三项均分排列 · 点击一行展开评分分布与评语" : "按三项均分排列 · 点击一行展开评分人数与分布",
+          officialResults ? "02" : "01", overallAverageLabel(edition));
         if (!officialRows.length) sheet.appendChild(el("p", "intro-text", "本届尚无有效评分，暂无名次可展示。"));
       }
       refs.content.appendChild(sheet);
@@ -9893,7 +9898,7 @@
           context.stroke();
           context.fillStyle = palette.text;
           context.font = "17px " + palette.serif;
-          context.fillText((award.rank ? "名次 " + award.rank + " · " : "") + (award.overall != null ? "综合 " + Number(award.overall).toFixed(2) : ""), 90, 550);
+          context.fillText((award.rank ? "名次 " + award.rank + " · " : "") + (award.overall != null ? (historicalResultsOf(edition) ? "综合" : "三项均分") + " " + Number(award.overall).toFixed(2) : ""), 90, 550);
           context.textAlign = "right";
           context.fillStyle = palette.muted;
           context.font = "14px " + palette.sans;
@@ -12138,7 +12143,7 @@
           var rank = historicalAward ? historicalAward.rank : currentRanking.rank;
           var total = historicalAward ? historicalRanking.rankings.length : ((cloudInsights[edition.slug] || {}).leaderboard || []).length;
           var score = historicalAward ? historicalAward.overall : currentRanking.totalAvg;
-          cardBody.appendChild(el("p", "work-award-rank", "名次 " + rank + " / " + total + (score != null ? " · 综合 " + Number(score).toFixed(2) : "")));
+          cardBody.appendChild(el("p", "work-award-rank", "名次 " + rank + " / " + total + (score != null ? " · " + (historicalAward ? "综合" : "三项均分") + " " + Number(score).toFixed(2) : "")));
         }
       }
 

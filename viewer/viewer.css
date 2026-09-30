@@ -4658,8 +4658,9 @@ body:has(.layout.home-active) .mobile-bar {
 .home-results-notice {
   grid-column: 1 / -1;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 14px;
+  gap: 8px 14px;
   padding: 12px 15px;
   border-left: 2px solid var(--accent);
   background: var(--panel);
@@ -4673,7 +4674,9 @@ body:has(.layout.home-active) .mobile-bar {
   font-weight: 600;
 }
 
+/* 说明文字占满剩余宽度，窄屏时自成一行，入口按钮不被挤成竖条 */
 .home-results-notice p {
+  flex: 1 1 240px;
   margin: 0;
   line-height: 1.65;
 }
@@ -9306,7 +9309,7 @@ html.is-dream-gate .boot-splash {
 
 .home-results-published { display: grid; justify-items: start; gap: 8px; }
 .home-results-published p { margin: 0; }
-.home-results-link { margin-top: 4px; text-decoration: none; }
+.home-results-link { flex: none; margin-top: 4px; text-decoration: none; }
 .home-award-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; width: 100%; margin: 8px 0; }
 .home-award-item { display: grid; gap: 6px; min-width: 0; padding: 12px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--text); text-decoration: none; }
 .home-award-item:first-child { border-color: var(--accent); }
