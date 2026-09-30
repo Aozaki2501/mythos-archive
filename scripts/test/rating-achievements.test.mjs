@@ -238,9 +238,11 @@ try {
   });
   const publicInsights = await publicInsightsResponse.json();
   assert.equal(publicInsightsResponse.ok, true, publicInsights.error);
-  assert.equal(publicInsights.data.rankingsAvailable, false);
-  assert.deepEqual(publicInsights.data.leaderboard, []);
-  assert.equal(publicInsights.data.distributions, null);
+  assert.equal(publicInsights.data.rankingsAvailable, true);
+  assert.equal(publicInsights.data.leaderboard.length, 1);
+  assert.equal(publicInsights.data.leaderboard[0].workId, workIds[0]);
+  assert.equal(publicInsights.data.leaderboard[0].ratingCount, 1);
+  assert.equal(publicInsights.data.distributions[workIds[0]].ratingCount, 1);
   exclusionDb.close();
 
   console.log("rating achievement API tests passed");

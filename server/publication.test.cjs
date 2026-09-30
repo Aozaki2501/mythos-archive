@@ -69,6 +69,7 @@ async function fixture(t) {
   const settings = JSON.parse(db.prepare("SELECT value FROM settings WHERE key = 'main'").get().value);
   settings.editions["2026"] = { phase: "统计", phaseAdvance: null, deadlines: {} };
   settings.authorBindings[workIds[0]] = "33333";
+  settings.authorBindings[workIds[2]] = "33333";
   settings.awardConfigs["2026"] = {
     authorRevealRankLimit: 1,
     specialAwards: [{ name: "特别奖", workId: workIds[1], excerpt: "短评", review: "正式评语" }],
@@ -79,11 +80,46 @@ async function fixture(t) {
   return { call, db };
 }
 
+test("统计期所有身份可读排名、评分和作者，特别奖与评语在公示前保密", async (t) => {
+  const { call, db } = await fixture(t);
+  db.prepare("INSERT INTO tokens (token, qq, role, exp) VALUES (?, ?, 'member', ?)")
+    .run("token-33333", "33333", Date.now() + 60000);
+  for (const token of ["", "visitor", "token-33333", "token-11111"]) {
+    const insights = await call("getEditionInsights", { editionSlug: "2026" }, token);
+    assert.equal(insights.rankingsAvailable, true);
+    assert.equal(insights.leaderboard[0].rank, 1);
+    assert.equal(insights.leaderboard[0].totalAvg, 5);
+    assert.deepEqual(insights.distributions[workIds[0]].chuanlu, [0, 0, 0, 0, 1]);
+    assert.equal(insights.publication, null);
+    assert.equal(insights.authorReveals[workIds[0]], "作者33333");
+    assert.equal(insights.authorReveals[workIds[2]], "作者33333", "未评分、非获奖作品也公开已绑定作者");
+    assert.equal(Object.hasOwn(insights, "authorBindings"), false);
+    const awards = await call("getEditionAwards", { editionSlug: "2026" }, token);
+    assert.equal(awards.published, false);
+    assert.deepEqual(awards.specialAwards, []);
+    assert.deepEqual(awards.authorReveals, {});
+  }
+  const anonymousBundle = await call("getWorkBundle", { workId: workIds[0] });
+  assert.deepEqual(anonymousBundle.ratings, []);
+  const settings = JSON.parse(db.prepare("SELECT value FROM settings WHERE key = 'main'").get().value);
+  for (const phase of ["征文", "评分"]) {
+    settings.editions["2026"].phase = phase;
+    db.prepare("UPDATE settings SET value = ? WHERE key = 'main'").run(JSON.stringify(settings));
+    for (const token of ["", "visitor", "token-33333", "token-11111"]) {
+      const insights = await call("getEditionInsights", { editionSlug: "2026" }, token);
+      assert.equal(insights.rankingsAvailable, false);
+      assert.deepEqual(insights.leaderboard, []);
+      assert.equal(insights.distributions, null);
+      assert.deepEqual(insights.authorReveals, {});
+    }
+  }
+});
+
 test("阶段只能由两位不同管理员确认，正式结果保持固定", async (t) => {
   const { call, db } = await fixture(t);
   const first = "token-11111";
   const second = "token-22222";
-  const original = await call("getEditionInsights", { editionSlug: "2026" }, first); // 统计阶段排名只对管理员开放
+  const original = await call("getEditionInsights", { editionSlug: "2026" }, first);
   assert.equal(original.publication, null);
   assert.equal(original.leaderboard[0].workId, workIds[0]);
   assert.equal((await call("getEditionAwards", { editionSlug: "2026" })).published, false);
@@ -118,15 +154,35 @@ test("阶段只能由两位不同管理员确认，正式结果保持固定", as
   const awards = await call("getEditionAwards", { editionSlug: "2026" });
   assert.deepEqual(insights.leaderboard, original.leaderboard);
   assert.equal(awards.authorReveals[workIds[0]], "作者33333");
+  assert.equal(awards.authorReveals[workIds[2]], "作者33333", "统计期公开的作者在公示后仍可见");
   assert.equal(awards.specialAwards[0].review, "正式评语");
   assert.deepEqual(awards.publication, insights.publication);
 
   db.prepare("UPDATE ratings SET chuanlu = 1, dangan = 1, overall = 1 WHERE id = 'r1'").run();
   db.prepare("UPDATE users SET nickname = '改名后' WHERE qq = '33333'").run();
   assert.deepEqual((await call("getEditionInsights", { editionSlug: "2026" })).leaderboard, insights.leaderboard);
+  assert.deepEqual((await call("getEditionInsights", { editionSlug: "2026" })).authorReveals, insights.authorReveals);
   assert.deepEqual((await call("getEditionAwards", { editionSlug: "2026" })).authorReveals, awards.authorReveals);
   await assert.rejects(call("adminSaveEditionAwardsConfig", { editionSlug: "2026", config: { authorRevealRankLimit: 0, specialAwards: [] } }, first), /不可修改/);
   assert.throws(() => db.prepare("DELETE FROM edition_publications WHERE editionSlug = '2026'").run(), /不可删除/);
+});
+
+test("旧公示快照保持原有作者公开范围", async (t) => {
+  const { call, db } = await fixture(t);
+  const legacy = {
+    editionSlug: "2026",
+    publishedAt: "2026-09-29T12:00:00.000Z",
+    leaderboard: [{ rank: 1, workId: workIds[0], ratingCount: 1, totalAvg: 5 }],
+    distributions: { [workIds[0]]: { ratingCount: 1, chuanlu: [0, 0, 0, 0, 1], dangan: [0, 0, 0, 0, 1], overall: [0, 0, 0, 0, 1] } },
+    awards: { published: true, authorRevealRankLimit: 1, awardedWorkIds: [workIds[0]], authorReveals: { [workIds[0]]: "旧公示作者" }, specialAwards: [] },
+  };
+  db.prepare("INSERT INTO edition_publications (editionSlug, publishedAt, snapshot) VALUES (?, ?, ?)")
+    .run("2026", legacy.publishedAt, JSON.stringify(legacy));
+  const insights = await call("getEditionInsights", { editionSlug: "2026" });
+  const awards = await call("getEditionAwards", { editionSlug: "2026" });
+  assert.deepEqual(insights.authorReveals, legacy.awards.authorReveals);
+  assert.deepEqual(awards.authorReveals, legacy.awards.authorReveals);
+  assert.equal(insights.authorReveals[workIds[2]], undefined);
 });
 
 test("无奖项配置不虚构奖项；目录外评分使发布回滚", async (t) => {
@@ -145,7 +201,7 @@ test("无奖项配置不虚构奖项；目录外评分使发布回滚", async (t
   const awards = await call("getEditionAwards", { editionSlug: "2026" });
   assert.equal(awards.published, true);
   assert.deepEqual(awards.specialAwards, []);
-  assert.deepEqual(awards.authorReveals, {});
+  assert.equal(awards.authorReveals[workIds[0]], "作者33333");
 });
 
 test("评论请求重试返回同一结果，删除后仍按账号去重", async (t) => {

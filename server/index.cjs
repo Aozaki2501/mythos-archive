@@ -1531,6 +1531,17 @@ function publicPublication(publication) {
   return publication ? { publishedAt: publication.publishedAt } : null;
 }
 
+function editionAuthorReveals(settings, editionSlug) {
+  const authorReveals = {};
+  const bindings = settings.authorBindings || {};
+  manifestCatalogueIds(editionSlug).forEach((workId) => {
+    const qq = String(bindings[workId] || "");
+    const author = qq && getUser(qq);
+    if (author && author.nickname) authorReveals[workId] = author.nickname;
+  });
+  return authorReveals;
+}
+
 function publicEditionAwards(settings, editionSlug, leaderboard) {
   const config = settings.awardConfigs && settings.awardConfigs[editionSlug];
   if (!config) {
@@ -1580,6 +1591,7 @@ function createPublication(settings, editionSlug, confirmedBy) {
     confirmedBy,
     leaderboard,
     distributions: editionScoreDistributions(editionSlug),
+    authorReveals: editionAuthorReveals(settings, editionSlug),
     awards: publicEditionAwards(settings, editionSlug, leaderboard),
   };
   db.prepare("INSERT INTO edition_publications (editionSlug, publishedAt, snapshot) VALUES (?, ?, ?)")
@@ -1706,7 +1718,7 @@ async function handle(action, payload, auth, ctx) {
       const publication = publicationOf(editionSlug);
       const workStats = reportWorkStats(editionSlug);
       const rankingsAvailable = Boolean(
-        publication || (st.phase === "统计" && session && session.role === "admin"),
+        publication || st.phase === "统计",
       );
       const heat = workStats.map((row) => ({
         workId: row.workId,
@@ -1718,6 +1730,9 @@ async function handle(action, payload, auth, ctx) {
         heat,
         leaderboard: publication ? publication.leaderboard : rankingsAvailable ? editionLeaderboard(editionSlug) : [],
         distributions: publication ? publication.distributions : rankingsAvailable ? editionScoreDistributions(editionSlug) : null,
+        authorReveals: publication
+          ? publication.authorReveals || publication.awards.authorReveals || {}
+          : rankingsAvailable ? editionAuthorReveals(settings, editionSlug) : {},
         publication: publicPublication(publication),
       };
     }
@@ -1726,7 +1741,11 @@ async function handle(action, payload, auth, ctx) {
       const editionSlug = String(payload.editionSlug || "").trim();
       if (!/^[A-Za-z0-9_-]{1,64}$/.test(editionSlug)) throw new Error("届别编号无效");
       const publication = publicationOf(editionSlug);
-      if (publication) return { ...publication.awards, publication: publicPublication(publication) };
+      if (publication) return {
+        ...publication.awards,
+        authorReveals: publication.authorReveals || publication.awards.authorReveals || {},
+        publication: publicPublication(publication),
+      };
       return { published: false, authorRevealRankLimit: 0, awardedWorkIds: [], authorReveals: {}, specialAwards: [], publication: null };
     }
 
@@ -2104,7 +2123,7 @@ async function handle(action, payload, auth, ctx) {
           ratings = [];
         }
       } else if (st.phase === "统计") {
-        // 统计复核期间，普通账号只取回自己的评分，不能拼出实时排行榜。
+        // 统计阶段公开汇总接口，个人评分仍仅返回本人记录。
         ratings = user ? rawRatings.filter((r) => r.qq === user.qq) : [];
       } else if (st.phase === "公示") {
         // 公示阶段允许核对均分，但不暴露他人 QQ -> 分数的对应。

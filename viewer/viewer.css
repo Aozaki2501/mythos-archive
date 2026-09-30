@@ -3449,7 +3449,7 @@ textarea:focus-visible,
 }
 
 .results-sheet {
-  max-width: min(100%, 1080px);
+  max-width: min(100%, 1240px);
 }
 
 .historical-reviews-title {
@@ -6882,6 +6882,12 @@ body.is-white-ship-departing .witch-cube {
   .layout.sidebar-collapsed:not(.home-active) .content {
     padding-left: 280px;
   }
+
+  /* 统计、公示沿用首页与目录的宽屏版心；阅读页仍保留女巫侧边空间。 */
+  body[data-view="results"] .layout.sidebar-collapsed .content {
+    padding-left: 42px;
+    padding-right: 42px;
+  }
 }
 
 /* 把左侧这条留白画成有意的版心边界：一条很淡的竖线，而不是空着 */
@@ -9317,9 +9323,9 @@ html.is-dream-gate .boot-splash {
 .results-distributions { margin: 20px 0 34px; border-top: 1px solid var(--line-strong); }
 .results-distributions > summary { padding: 16px 0; color: var(--accent); font-family: var(--article-font); font-size: 16px; cursor: pointer; }
 .results-section-heading { display: flex; align-items: baseline; gap: 10px; margin: 36px 0 14px; padding-bottom: 8px; border-bottom: 2px solid var(--text); }
-.results-section-heading .panel-title { margin: 0; }
+.results-section-heading .panel-title { margin: 0; color: var(--text); font-size: 18px; }
 .results-section-number { color: var(--accent); font-family: var(--archive-number-font); font-size: 13px; }
-.results-section-caption { margin-left: auto; color: var(--muted); font-size: 11px; letter-spacing: .08em; }
+.results-section-caption { margin-left: auto; color: var(--muted); font-size: 13px; letter-spacing: .04em; }
 .award-gallery { display: grid; grid-template-columns: repeat(var(--award-cols, 3), minmax(0, 1fr)); gap: 12px; margin-bottom: 38px; }
 .award-card { min-width: 0; border: 1px solid var(--line-strong); background: var(--panel); }
 .award-card-main { display: flex; flex-direction: column; height: 100%; min-width: 0; padding: 16px; }
@@ -9349,11 +9355,11 @@ html.is-dream-gate .boot-splash {
 .award-card-overall { margin-top: 14px; color: var(--text); font-family: var(--archive-number-font); font-size: 22px; }
 /* 公示页「全部名次」（renderResultsRankList）：每行 名次 · 标题/作者 · 维度小条 · 综合分。
    维度条的颜色按位置取：第 1 项青绿、第 2 项朱红、第 3 项墨色；图例与之同序。
-   电脑上维度只给条，数字留给读屏；手机上改成一行小字直接写分数。 */
+   电脑上维度同时显示名称、均分与色条；窄屏改成一行明确分数。 */
 .results-rank-columns { margin: 0 0 20px; }
 .results-rank-list { margin: 0; padding: 0; list-style: none; }
 .rank-item { min-width: 0; border-bottom: 1px solid var(--line); }
-.rank-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) 132px 58px; align-items: center; gap: 0 14px; min-width: 0; padding: 14px 0; }
+.rank-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) 142px 76px; align-items: center; gap: 0 12px; min-width: 0; padding: 18px 0; }
 /* 可展开的行：整行可点，展开后行底一条朱红细线；详情在行下方 */
 summary.rank-row { list-style: none; cursor: pointer; transition: background-color var(--dur-quick) ease; }
 summary.rank-row::-webkit-details-marker { display: none; }
@@ -9364,36 +9370,39 @@ summary.rank-row:focus-visible { outline: 2px solid var(--accent); outline-offse
 /* 行内的分布去掉卡片外框：维度名 | 色条，下面一行小字写各分值占比 */
 .rank-row-detail .distribution-block { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: 4px 10px; margin: 0 0 12px; padding: 0; border: 0; background: none; }
 .rank-row-detail .distribution-head { margin: 0; }
-.rank-row-detail .distribution-label { font-size: 13px; }
+.rank-row-detail .distribution-label { font-size: 14px; }
 .rank-row-detail .distribution-total { display: none; }
 .rank-row-detail .distribution-bar { height: 10px; }
 .rank-row-detail .distribution-legend { display: flex; flex-wrap: wrap; grid-column: 2; margin: 0; gap: 4px 12px; }
-.rank-row-detail .distribution-item { gap: 5px; color: var(--muted); font-size: 11px; }
+.rank-row-detail .distribution-item { gap: 5px; color: var(--muted); font-size: 13px; }
 .rank-row-detail .distribution-swatch { width: 8px; height: 8px; }
 .rank-row-detail .historical-review { margin: 14px 0 0; }
 .rank-row-detail .historical-review:first-child { margin-top: 0; }
-.rank-row-detail-note { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+.rank-row-detail-note { margin: 0 0 10px; color: var(--muted); font-size: 14px; }
 /* 刊头下的一行数字 */
 .results-figures { display: flex; flex-wrap: wrap; gap: 6px 24px; margin: 0 0 8px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 .results-figure strong { margin-right: 2px; color: var(--text); font-family: var(--archive-number-font); font-size: 18px; font-weight: 400; }
-.rank-row-no { color: var(--accent); font-family: var(--archive-number-font); font-size: 13px; }
+.rank-row-no { color: var(--accent); font-family: var(--archive-number-font); font-size: 18px; }
 .rank-row-main { min-width: 0; }
 .rank-row-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.rank-row-link { overflow: hidden; color: var(--text); font-family: var(--article-font); font-size: 14px; font-weight: 700; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+.rank-row-link { min-width: 0; color: var(--text); font-family: var(--article-font); font-size: 18px; line-height: 1.5; font-weight: 700; text-decoration: none; overflow-wrap: anywhere; }
 a.rank-row-link:hover { color: var(--accent); text-decoration: underline; }
 a.rank-row-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.rank-row-author { overflow: hidden; margin-top: 2px; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.rank-row-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-top: 4px; }
+.rank-row-author { color: var(--muted); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.rank-row-count { color: var(--muted); font-size: 14px; line-height: 1.5; white-space: nowrap; }
 .rank-list-award { flex: none; width: auto; height: 18px; }
-.rank-row-dims { display: grid; gap: 2px; }
-.rank-row-dim { --dim-color: var(--dim-1); display: block; height: 3px; background: linear-gradient(to right, var(--dim-color) var(--score-pct, 0%), var(--line) var(--score-pct, 0%)); }
+.rank-row-dims { display: grid; gap: 6px; }
+.rank-row-dim { --dim-color: var(--dim-1); position: relative; display: flex; justify-content: space-between; gap: 8px; padding-bottom: 5px; color: var(--muted); font-size: 13px; line-height: 1.3; }
+.rank-row-dim::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: linear-gradient(to right, var(--dim-color) var(--score-pct, 0%), var(--line) var(--score-pct, 0%)); }
 .rank-row-dim:nth-child(2) { --dim-color: var(--dim-2); }
 .rank-row-dim:nth-child(3) { --dim-color: var(--dim-3); }
-.rank-row-dim-label,
-.rank-row-dim-value { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
-.rank-row-score { position: relative; align-self: stretch; display: flex; align-items: center; justify-content: flex-end; padding-left: 14px; color: var(--text); font-family: var(--archive-number-font); font-size: 17px; }
+.rank-row-dim-value { color: var(--text); font-family: var(--archive-number-font); font-size: 15px; }
+.rank-row-score { position: relative; align-self: stretch; display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 3px; padding-left: 12px; color: var(--text); font-family: var(--archive-number-font); font-size: 26px; }
+.rank-row-score-label { color: var(--muted); font-family: var(--article-font); font-size: 13px; }
 /* 综合分前面那条短线（只到维度小条那么高，不是整列通高） */
 .rank-row-score::before { content: ""; position: absolute; left: 0; top: 50%; width: 1px; height: 22px; margin-top: -11px; background: var(--line-strong); }
-.rank-dim-legend { display: flex; gap: 18px; margin: -4px 0 4px; color: var(--muted); font-size: 12px; }
+.rank-dim-legend { display: flex; gap: 18px; margin: -4px 0 4px; color: var(--muted); font-size: 14px; }
 .rank-dim-legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .rank-dim-legend-swatch { display: inline-block; width: 22px; height: 3px; background: var(--dim-1); }
 .rank-dim-legend-item:nth-child(2) .rank-dim-legend-swatch { background: var(--dim-2); }
@@ -9406,7 +9415,7 @@ a.rank-row-link:focus-visible { outline: 2px solid var(--accent); outline-offset
   .witch-portrait { mask-image: linear-gradient(to bottom, #000 86%, transparent); }
 }
 
-@media (min-width: 801px) {
+@media (min-width: 1200px) {
   /* 两栏按列排：左栏 1–10、右栏 11–20，两栏各自独立增高 */
   .results-rank-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; column-gap: 26px; }
 }
@@ -9423,19 +9432,26 @@ a.rank-row-link:focus-visible { outline: 2px solid var(--accent); outline-offset
   .award-card-overall { margin: 0 0 0 auto; }
   .award-card-featured .award-card-title { font-size: 26px; }
   .results-section-caption { display: none; }
+}
+
+@media (max-width: 1199px) {
   /* 窄屏名次：单栏，维度改成一行小字写分数，不再需要图例 */
   .rank-dim-legend { display: none; }
   .rank-row { grid-template-columns: 28px minmax(0, 1fr) auto; gap: 4px 10px; padding: 12px 0; }
   .rank-row-detail { padding: 10px 0 16px 38px; }
-  .rank-row-no { grid-row: 1 / 3; align-self: start; padding-top: 2px; font-size: 15px; }
-  .rank-row-link { white-space: normal; overflow-wrap: anywhere; font-size: 15px; }
+  .rank-row-no { grid-row: 1 / 3; align-self: start; padding-top: 2px; font-size: 16px; }
+  .rank-row-link { font-size: 17px; }
   .rank-row-dims { grid-column: 2 / 4; grid-row: 2; display: flex; flex-wrap: wrap; gap: 2px 12px; }
-  .rank-row-dim { height: auto; background: none; color: var(--muted); font-size: 11px; }
+  .rank-row-dim { display: inline; padding-bottom: 0; }
+  .rank-row-dim::after { display: none; }
   .rank-row-dim-label,
   .rank-row-dim-value { position: static; width: auto; height: auto; overflow: visible; clip: auto; }
   .rank-row-dim-value { margin-left: 4px; color: var(--text); font-family: var(--archive-number-font); }
-  .rank-row-score { grid-column: 3; grid-row: 1; align-self: start; padding-left: 0; font-size: 18px; }
+  .rank-row-score { grid-column: 3; grid-row: 1; align-self: start; padding-left: 0; }
   .rank-row-score::before { display: none; }
+}
+
+@media (max-width: 800px) {
   .results-sheet .rank-table { display: block; width: 100%; min-width: 0; overflow: visible; white-space: normal; border: 0; }
   .results-sheet .rank-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
   .results-sheet .rank-table tbody { display: grid; gap: 10px; }

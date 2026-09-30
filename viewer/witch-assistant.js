@@ -103,6 +103,11 @@
       ["results-2", "名次只是今夜的月相，每份档案仍值得翻开。"],
       ["results-3", "获奖的名字留在这里，其他故事也一样被好好收着。"],
     ],
+    statistics: [
+      ["statistics-1", "评分已收齐。先翻看名次与评分分布，特别奖的印章还要等一等。"],
+      ["statistics-2", "作者的名字已经解封。点开一行，就能看看这份档案收到了怎样的评议。"],
+      ["statistics-3", "名次先放在这里，特别奖与评委评语会在公示时一同归档。"],
+    ],
     article: [
       ["article-1", "档案已经打开。往下走吧，我在这里等你。"],
       ["article-2", "梦门已经开了。进去以后看到什么，就不能怪馆员了。"],
@@ -906,7 +911,7 @@
       assistantState.storyId = null;
       assistantState.storyNode = null;
       if (context) {
-        var selected = chooseDialogue(DIALOGUE[context.pageType] || DIALOGUE.home);
+        var selected = chooseDialogue(dialogueForContext(context));
         setDialogue(selected.text);
       }
     }
@@ -1134,7 +1139,7 @@
     assistantState.storyNode = null;
     setStableExpression("normal");
     if (context) {
-      var selected = chooseDialogue(DIALOGUE[context.pageType] || DIALOGUE.home);
+      var selected = chooseDialogue(dialogueForContext(context));
       setDialogue(selected.text);
     }
     renderActions(refs.actions, false);
@@ -1210,10 +1215,16 @@
     return true;
   }
 
+  function dialogueForContext(nextContext) {
+    if (nextContext.pageType === "results" && nextContext.phase === "统计") return DIALOGUE.statistics;
+    return DIALOGUE[nextContext.pageType] || DIALOGUE.home;
+  }
+
   function contextKeyFor(nextContext) {
     return [
       nextContext.pageType,
       nextContext.editionSlug,
+      nextContext.phase,
       nextContext.workId,
     ].join("|");
   }
@@ -1227,7 +1238,7 @@
     }
     /* 页面切换只使用页面导览词。主题台词在主题真正切换时单独触发，
        否则黑夜模式下每次路由变化都会重复“黑夜模式”开场。 */
-    var selected = chooseDialogue(DIALOGUE[nextContext.pageType] || DIALOGUE.home);
+    var selected = chooseDialogue(dialogueForContext(nextContext));
     setDialogue(selected.text);
     scheduleSpeechBubble("context");
   }

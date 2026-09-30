@@ -1925,6 +1925,10 @@
   }
 
   function revealedAuthorName(editionSlug, id) {
+    var insight = cloudInsights[editionSlug];
+    if ((isJudgePhase(editionSlug) || isPublicPhase(editionSlug)) && insight && insight.rankingsAvailable) {
+      return String((insight.authorReveals || {})[id] || "");
+    }
     var result = editionAwardsData(editionSlug);
     return result && result.published && result.authorReveals
       ? String(result.authorReveals[id] || "")
@@ -2110,6 +2114,16 @@
   }
 
   function averages(id) {
+    var slug = id.split("/")[0];
+    if (USE_CLOUD && (isJudgePhase(slug) || isPublicPhase(slug))) {
+      var insight = cloudInsights[slug];
+      var distribution = insight && insight.rankingsAvailable && insight.distributions && insight.distributions[id];
+      var publicStats = { count: distribution ? Number(distribution.ratingCount) || 0 : 0 };
+      DIMENSIONS.forEach(function (dim) {
+        publicStats[dim.key] = averageFromBins(distribution && distribution[dim.key]);
+      });
+      return publicStats;
+    }
     var list = ratingsOf(id);
     var result = { count: list.length };
     DIMENSIONS.forEach(function (dim) {
@@ -2773,6 +2787,12 @@
   }
 
   function scoreDistribution(id, dimKey) {
+    var slug = id.split("/")[0];
+    if (USE_CLOUD && (isJudgePhase(slug) || isPublicPhase(slug))) {
+      var insight = cloudInsights[slug];
+      var distribution = insight && insight.rankingsAvailable && insight.distributions && insight.distributions[id];
+      return distribution && Array.isArray(distribution[dimKey]) ? distribution[dimKey].slice() : [0, 0, 0, 0, 0];
+    }
     var bins = [0, 0, 0, 0, 0];
     ratingsOf(id).forEach(function (r) {
       var v = Math.round(r[dimKey] || 0);
@@ -5115,15 +5135,15 @@
     }
 
     body.appendChild(el("hr", "modal-rule"));
-    body.appendChild(el("h3", "modal-sub", "匿名规则与评委特别奖"));
+    body.appendChild(el("h3", "modal-sub", "评委特别奖"));
     body.appendChild(
       el(
         "p",
         "modal-meta",
-        "不展示捐赠奖品。设置作者公开名次，并在结果公示时展示特别奖与评语。",
+        "投票统计期公开排名、评分与已绑定作者；结果公示期公布特别奖与评语。不展示捐赠奖品。",
       ),
     );
-    var awardConfigButton = el("button", "btn-ghost", "配置匿名规则与特别奖");
+    var awardConfigButton = el("button", "btn-ghost", "配置特别奖与评语");
     awardConfigButton.type = "button";
     awardConfigButton.addEventListener("click", function () {
       openEditionAwardConfigModal(slug);
@@ -5331,8 +5351,8 @@
     var edition = findEdition(editionSlug);
     if (!edition) return;
     var loading = el("div", "modal-body");
-    loading.appendChild(el("p", "modal-meta", "正在读取匿名规则与特别奖…"));
-    openModal("匿名规则与评委特别奖", loading);
+    loading.appendChild(el("p", "modal-meta", "正在读取特别奖与评语…"));
+    openModal("评委特别奖", loading);
 
     var load = USE_CLOUD
       ? window.MythosAPI.call("adminGetEditionAwardsConfig", {
@@ -5349,7 +5369,7 @@
       var fail = el("div", "modal-body");
       fail.appendChild(backToAdminButton());
       fail.appendChild(el("p", "auth-error", err.message || String(err)));
-      openModal("匿名规则与评委特别奖", fail);
+      openModal("评委特别奖", fail);
     });
 
     function renderEditor(config) {
@@ -5369,26 +5389,18 @@
         el(
           "p",
           "modal-meta",
-          "奖品清单和捐赠信息不公开。获奖作者在公示阶段解封；特别奖作品不受名次上限限制。",
+          "排名、评分与已绑定作者在投票统计期公开。特别奖与评语仅在结果公示期发布，统计期间可继续编写。奖品清单和捐赠信息不公开。",
         ),
       );
 
-      var rankField = el("label", "field-label", "作者公开名次上限");
-      var rankInput = el("input", "auth-input");
-      rankInput.type = "number";
-      rankInput.min = "0";
-      rankInput.max = String((edition.works || []).length);
-      rankInput.step = "1";
-      rankInput.value = String(
-        config.authorRevealRankLimit == null ? 25 : config.authorRevealRankLimit,
-      );
-      rankField.appendChild(rankInput);
-      body.appendChild(rankField);
+      // 保留旧配置值供已有公示和奖励范围使用；不再限制统计期作者公开。
+      var rankLimit = config.authorRevealRankLimit == null ? 25 : Number(config.authorRevealRankLimit);
+      rankLimit = Math.min((edition.works || []).length, Math.max(0, Math.floor(rankLimit) || 0));
       body.appendChild(
         el(
           "p",
           "modal-meta",
-          "例如填 25，表示前 25 名可以公开作者；第 26 名及以后匿名。特别奖获奖作品会在公示时解封作者。作者昵称取自现有作者 QQ 绑定，请先确认获奖作品已绑定。",
+          "作者昵称取自作者 QQ 绑定，请先确认参赛作品已绑定作者。未绑定的作品显示匿名。",
         ),
       );
 
@@ -5410,7 +5422,7 @@
       var save = el("button", "btn", "保存本届设置");
       save.type = "button";
       body.appendChild(save);
-      openModal("匿名规则与评委特别奖", body);
+      openModal("评委特别奖", body);
 
       function paintAwards() {
         clear(awardList);
@@ -5498,12 +5510,6 @@
       save.addEventListener("click", function () {
         error.hidden = true;
         status.textContent = "";
-        var rankLimit = Number(rankInput.value);
-        if (!Number.isInteger(rankLimit) || rankLimit < 0 || rankLimit > (edition.works || []).length) {
-          error.textContent = "名次上限请填写 0 到 " + (edition.works || []).length + " 之间的整数。";
-          error.hidden = false;
-          return;
-        }
         var nextAwards = [];
         var rows = awardList.querySelectorAll(".award-editor-item");
         for (var i = 0; i < rows.length; i++) {
@@ -7125,7 +7131,7 @@
     }
 
     var phase = phaseOf(state.editionSlug);
-    var showPublicAverages = isAdmin() || phase === "公示";
+    var showPublicAverages = isAdmin() || phase === "统计" || phase === "公示";
     var summary = el("div", "score-summary");
     var stats = averages(id);
     // 投票人数只给管理员看；其他人没评过时显示"尚未评分"
@@ -8209,9 +8215,9 @@
 
   // 公示页「全部名次」：历届与本届共用。rows 为 { rank, title, href, award, author, dims: [数值|null], overall }，
   // dimLabels 与 dims 一一对应（历届两项、本届三项）。电脑上两栏按列排（左 1–10、右 11–20），手机单栏。
-  function renderResultsRankList(parent, rows, dimLabels, caption) {
+  function renderResultsRankList(parent, rows, dimLabels, caption, sectionNumber) {
     var heading = el("div", "results-section-heading");
-    heading.appendChild(el("span", "results-section-number", "02"));
+    heading.appendChild(el("span", "results-section-number", sectionNumber || "02"));
     heading.appendChild(el("h2", "panel-title", "全部名次"));
     heading.appendChild(el("span", "results-section-caption", caption));
     parent.appendChild(heading);
@@ -8257,7 +8263,10 @@
       }
       if (row.award) title.appendChild(createTagSeal(row.award, "rank-list-award"));
       main.appendChild(title);
-      main.appendChild(el("div", "rank-row-author", row.author));
+      var meta = el("div", "rank-row-meta");
+      meta.appendChild(el("span", "rank-row-author", row.author));
+      if (row.ratingCount != null) meta.appendChild(el("span", "rank-row-count", row.ratingCount + " 人评分"));
+      main.appendChild(meta);
       item.appendChild(main);
       var dims = el("div", "rank-row-dims");
       dimLabels.forEach(function (label, index) {
@@ -8269,8 +8278,11 @@
         dims.appendChild(dim);
       });
       item.appendChild(dims);
-      var score = el("span", "rank-row-score", row.overall == null ? "—" : row.overall.toFixed(2));
-      score.setAttribute("aria-label", "综合 " + score.textContent);
+      var scoreText = row.overall == null ? "—" : row.overall.toFixed(2);
+      var score = el("span", "rank-row-score");
+      score.appendChild(el("span", "rank-row-score-value", scoreText));
+      score.appendChild(el("span", "rank-row-score-label", "均分"));
+      score.setAttribute("aria-label", "综合均分 " + scoreText);
       item.appendChild(score);
       items.push(li);
     });
@@ -8438,17 +8450,17 @@
 
   // 结果公报印章（原型是「正式公示」圆章）：三行 —— 正式 / 公示 / 年份 · 公报
   // 未定稿时外圈走虚线，和正式章区分开
-  function createResultsStatusMark(official, year) {
+  function createResultsStatusMark(official, year, statistics) {
     var mark = document.createElementNS(SVG_NS, "svg");
     mark.setAttribute("class", "seal results-status-mark" + (official ? " is-official" : ""));
     mark.setAttribute("viewBox", "0 0 100 100");
     mark.setAttribute("role", "img");
-    mark.setAttribute("aria-label", official ? "正式公示" : "当前为实时数据预览");
-    var lines = official ? ["正式", "公示"] : ["实时", "预览"];
+    mark.setAttribute("aria-label", official ? "正式公示" : statistics ? "投票统计，排名与评分已开放" : "当前为实时数据预览");
+    var lines = official ? ["正式", "公示"] : statistics ? ["投票", "统计"] : ["实时", "预览"];
     mark.innerHTML = '<g filter="url(#ink)"><circle cx="50" cy="50" r="46" fill="none" stroke="currentColor" stroke-width="3.5"' + (official ? "" : ' stroke-dasharray="7 5"') + "/>" +
       '<circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" stroke-width="1"/>' +
       '<g text-anchor="middle" font-weight="800" fill="currentColor" font-size="21" letter-spacing="2"><text x="51" y="41">' + lines[0] + '</text><text x="51" y="63">' + lines[1] + "</text></g>" +
-      (year ? '<text x="50" y="78" text-anchor="middle" font-size="9" letter-spacing=".6" fill="currentColor" style="font-family:Georgia,serif">' + escapeSvgText(year + (official ? " · 公报" : " · 预览")) + "</text>" : "") +
+      (year ? '<text x="50" y="78" text-anchor="middle" font-size="9" letter-spacing=".6" fill="currentColor" style="font-family:Georgia,serif">' + escapeSvgText(year + (official ? " · 公报" : statistics ? " · 统计" : " · 预览")) + "</text>" : "") +
       "</g>";
     return mark;
   }
@@ -8628,19 +8640,19 @@
       }
       resultsDeadlineMeta.textContent = "截止 " + resultsDeadlineText;
     }
-    if (!officialResults) resultsHeadAside.appendChild(resultsPhaseChip);
-    var resultsMark = createResultsStatusMark(officialResults, edition.year);
+    if (!officialResults && !isJudgePhase(edition.slug)) resultsHeadAside.appendChild(resultsPhaseChip);
+    else if (isJudgePhase(edition.slug) && resultsDeadlineMeta && phaseDeadlineOf(edition.slug, phaseOf(edition.slug))) {
+      resultsHeadAside.appendChild(el("p", "results-edition", resultsDeadlineMeta.textContent));
+    }
+    var resultsMark = createResultsStatusMark(officialResults, edition.year, isJudgePhase(edition.slug));
     resultsHeadAside.appendChild(resultsMark);
     resultsHead.appendChild(resultsHeadAside);
     sheet.appendChild(resultsHead);
     var resultIntro = officialResults
       ? "本卷奖项与最终排名已归档。"
-      : "本届尚未发布固定结果。管理员可在管理面板双人确认推进阶段；下列为当前实时数据预览。";
-    if (awardResult && awardResult.published && officialResults) {
-      resultIntro += awardResult.authorRevealRankLimit
-        ? "前 " + awardResult.authorRevealRankLimit + " 名及特别奖作品公开作者，其余作品匿名。"
-        : "特别奖作品公开作者，其余作品匿名。";
-    }
+      : isJudgePhase(edition.slug)
+        ? "大众评分已结束，排名与评分情况现已开放。特别奖与评委评语将在结果公示阶段公布；当前排名可能随统计核验调整。"
+        : "本届排名与评分情况将在投票统计阶段开放。";
     sheet.appendChild(
       el("p", "intro-text results-intro", resultIntro),
     );
@@ -8650,7 +8662,16 @@
         [edition.works.length, "份档案"],
         [officialAwards.length, "项奖"],
         [officialAwards.filter(function (award) { return award.review || award.excerpt; }).length, "条评语"],
-        [Object.keys(awardResult.authorReveals || {}).length, "位作者解封"],
+        [Object.keys(awardResult.authorReveals || {}).length, "份署名档案"],
+      ]);
+    } else if (isJudgePhase(edition.slug)) {
+      var statisticsInsight = cloudInsights[edition.slug];
+      var statisticsRows = statisticsInsight && statisticsInsight.rankingsAvailable ? statisticsInsight.leaderboard || [] : [];
+      renderResultsFigures(sheet, [
+        [edition.works.length, "份档案"],
+        [statisticsRows.length, "份已评分"],
+        [statisticsRows.reduce(function (sum, row) { return sum + Number(row.ratingCount || 0); }, 0), "份评议"],
+        [Object.keys(statisticsInsight && statisticsInsight.authorReveals || {}).length, "份署名档案"],
       ]);
     } else {
       var resultSummary = el("dl", "results-summary");
@@ -8734,9 +8755,9 @@
     if (USE_CLOUD) {
       if (!insight || !insight.rankingsAvailable) {
         sheet.appendChild(el("p", "intro-text", "本届排名将在统计阶段或结果公示阶段开放。"));
-      } else if (officialResults) {
+      } else {
         var awardsByWork = {};
-        (awardResult.specialAwards || []).forEach(function (award) {
+        (officialResults ? awardResult.specialAwards || [] : []).forEach(function (award) {
           if (award && award.workId && award.name) awardsByWork[award.workId] = award;
         });
         var officialRows = [];
@@ -8748,7 +8769,8 @@
           officialRows.push({
             rank: row.rank, title: work.title, award: award ? award.name : "",
             href: "#/" + edition.slug + "/" + encodeURIComponent(work.slug),
-            author: (awardResult.authorReveals || {})[row.workId] || "匿名",
+            author: (insight.authorReveals || {})[row.workId] || "匿名",
+            ratingCount: Number(row.ratingCount) || 0,
             dims: dimensionAveragesOf(distribution),
             overall: Number.isFinite(Number(row.totalAvg)) ? Number(row.totalAvg) : null,
             detail: distribution || (award && award.review) ? function () {
@@ -8756,67 +8778,10 @@
             } : null,
           });
         });
-        renderResultsRankList(sheet, officialRows, DIMENSIONS.map(function (dim) { return dim.label; }), "按三项均分排列 · 点击一行展开评分分布与评语");
-      } else {
-        var publicTable = el("table", "rank-table");
-        var publicHead = el("thead");
-        var publicHeadRow = el("tr");
-        var publicColumns = ["名次", "编号", "标题"];
-        if (awardResult && awardResult.published) publicColumns.push("作者");
-        publicColumns.push("综合均分", "评分人数");
-        publicColumns.forEach(function (label) { publicHeadRow.appendChild(el("th", null, label)); });
-        publicHead.appendChild(publicHeadRow); publicTable.appendChild(publicHead);
-        var publicBody = el("tbody");
-        (insight.leaderboard || []).forEach(function (row) {
-          var work = edition.works.filter(function (item) { return workId(edition.slug, item.slug) === row.workId; })[0];
-          if (!work) return;
-          var rankNumber = Number(row.rank);
-          var tr = el(
-            "tr",
-            officialResults && rankNumber >= 1 && rankNumber <= 3
-              ? "rank-table-row rank-table-row-top rank-table-row-top-" + rankNumber
-              : "rank-table-row",
-          );
-          tr.dataset.workId = row.workId;
-          appendRankCell(tr, row.rank);
-          tr.appendChild(el("td", "rank-work-number", String(work.no).padStart(2, "0")));
-          var titleCell = el("td", "rank-title-cell");
-          var titleContent = el("div", "rank-title-content");
-          var titleLink = el("button", "linkish rank-title-link", work.title);
-          titleLink.type = "button";
-          titleLink.addEventListener("click", function () {
-            location.hash = "#/" + edition.slug + "/" + encodeURIComponent(work.slug);
-          });
-          titleContent.appendChild(titleLink);
-          titleContent.appendChild(el("span", "rank-title-leader"));
-          appendAwardMark(titleContent, row.workId);
-          titleCell.appendChild(titleContent);
-          tr.appendChild(titleCell);
-          if (awardResult && awardResult.published) appendRevealAuthorCell(tr, row.workId);
-          tr.appendChild(el("td", "rank-score-cell", Number(row.totalAvg).toFixed(2)));
-          tr.appendChild(el("td", "rank-count-cell", String(row.ratingCount)));
-          publicBody.appendChild(tr);
-        });
-        publicTable.appendChild(publicBody);
-        appendResultsRanking(sheet, publicTable, officialResults ? "全部名次" : "综合均分排名");
-      }
-      if (!officialResults && insight && insight.distributions) {
-        var publicDistributionRows = el("div", "result-distribution-list");
-        (insight.leaderboard || []).forEach(function (row) {
-          var work = edition.works.filter(function (item) {
-            return workId(edition.slug, item.slug) === row.workId;
-          })[0];
-          var data = insight.distributions[row.workId];
-          var details = work && renderWorkDistribution(
-            work,
-            row.rank,
-            row.totalAvg,
-            row.ratingCount,
-            data,
-          );
-          if (details) publicDistributionRows.appendChild(details);
-        });
-        appendResultsDistributions(sheet, publicDistributionRows);
+        renderResultsRankList(sheet, officialRows, DIMENSIONS.map(function (dim) { return dim.label; }),
+          officialResults ? "按综合均分排列 · 点击一行展开评分分布与评语" : "按综合均分排列 · 点击一行展开评分人数与分布",
+          officialResults ? "02" : "01");
+        if (!officialRows.length) sheet.appendChild(el("p", "intro-text", "本届尚无有效评分，暂无名次可展示。"));
       }
       refs.content.appendChild(sheet);
       window.scrollTo(0, 0);
@@ -10755,7 +10720,7 @@
       return item.works && item.works.length;
     })[0] || editions[0];
     return edition &&
-      (isPublicPhase(edition.slug) || (isAdmin() && isJudgePhase(edition.slug)))
+      (isPublicPhase(edition.slug) || isJudgePhase(edition.slug))
       ? edition
       : null;
   }
@@ -11462,17 +11427,20 @@
     heroState.appendChild(phaseLine);
     var timeline = renderPhaseTimeline(edition.slug);
     if (timeline) heroState.appendChild(timeline);
-    if (isJudgePhase(edition.slug) && !isAdmin()) {
+    if (isJudgePhase(edition.slug)) {
       var resultsNotice = el("aside", "home-results-notice");
       resultsNotice.setAttribute("role", "status");
-      resultsNotice.appendChild(el("span", "home-results-notice-label", "结果核验中"));
+      resultsNotice.appendChild(el("span", "home-results-notice-label", "投票统计 · 排名已开放"));
       resultsNotice.appendChild(
         el(
           "p",
           null,
-          "评分已结束，管理员正在核对统计结果。确认并进入公示阶段后，排名与分布数据将在此开放。",
+          "大众评分已结束，可查看全部名次与评分分布。特别奖与评委评语将在结果公示阶段公布。",
         ),
       );
+      var statisticsLink = el("a", "btn home-results-link", "查看排名与评分 →");
+      statisticsLink.href = "#/" + edition.slug + "/__results";
+      resultsNotice.appendChild(statisticsLink);
       heroState.appendChild(resultsNotice);
     }
     if (isPublicPhase(edition.slug)) {
@@ -11594,14 +11562,12 @@
     clear(refs.content);
     var shell = el("div", "home-shell edition-shell");
     shell.dataset.vol = String(edition.year);
-    var anonymousAuthors = !isArchivedEdition(edition) && !isPublicPhase(edition.slug);
-    // 本届公示后目录要显示解封的作者：解封名单来自 getEditionAwards，没加载过就先取一次再重画
-    if (USE_CLOUD && !isArchivedEdition(edition) && isPublicPhase(edition.slug) && !cloudAwardsLoaded[edition.slug]) {
-      loadCloudEditionAwards(edition.slug).then(function () {
+    var anonymousAuthors = !isArchivedEdition(edition) && !isJudgePhase(edition.slug) && !isPublicPhase(edition.slug);
+    // 统计期起公开已绑定作者；作者名单与排名使用同一公开汇总。
+    if (USE_CLOUD && !anonymousAuthors && !isArchivedEdition(edition) && !cloudInsightsLoaded[edition.slug]) {
+      loadCloudEditionInsights(edition.slug).then(function () {
         if (state.view === "edition" && state.editionSlug === edition.slug && !state.workSlug) renderEditionOverview(edition);
-      }).catch(function () {
-        cloudAwardsLoaded[edition.slug] = true;
-      });
+      }).catch(function () { /* 作者名单读取失败时暂不显示署名。 */ });
     }
     shell.classList.toggle("is-anonymous-phase", anonymousAuthors);
     var head = el("section", "edition-overview-head");
@@ -11631,15 +11597,15 @@
     }
     if (anonymousAuthors) {
       head.appendChild(
-        el("p", "edition-anonymous-note", "评分期间作者匿名，结果公示时按获奖范围解封"),
+        el("p", "edition-anonymous-note", "评分期间作者匿名，投票统计阶段公开已绑定作者"),
       );
     }
     var timeline = renderPhaseTimeline(edition.slug);
     if (timeline) head.appendChild(timeline);
     var headTools = el("div", "edition-head-tools");
     headTools.appendChild(renderPhaseChip(edition.slug));
-    if (historicalResultsOf(edition)) {
-      var publication = el("a", "btn edition-publication-link", "查看本届公示");
+    if (historicalResultsOf(edition) || isJudgePhase(edition.slug) || isPublicPhase(edition.slug)) {
+      var publication = el("a", "btn edition-publication-link", isJudgePhase(edition.slug) ? "查看排名与评分" : "查看本届公示");
       publication.href = "#/" + edition.slug + "/__results";
       headTools.appendChild(publication);
     }
@@ -11897,7 +11863,7 @@
         }
         row.dataset.workId = workId(edition.slug, work.slug);
         if (!anonymousAuthors) {
-          // 历届沿用导入时的署名（含「未见署名」）；本届公示后只显示解封的作者，其余仍是「匿名」
+          // 历届沿用原件署名；本届统计期起显示已绑定作者。
           var shownAuthor = isArchivedEdition(edition)
             ? work.author
             : revealedAuthorName(edition.slug, workId(edition.slug, work.slug)) || "匿名";
@@ -11945,7 +11911,7 @@
 
   function renderWorkPublicStats(id, work) {
     var panel = el("section", "panel public-stats");
-    panel.appendChild(el("h2", "panel-title", "公示数据"));
+    panel.appendChild(el("h2", "panel-title", isJudgePhase(id.split("/")[0]) ? "评分统计" : "公示数据"));
     var stats = averages(id);
     var grid = el("div", "public-stats-grid");
     DIMENSIONS.forEach(function (dim) {
@@ -11973,7 +11939,9 @@
       el(
         "p",
         "rate-hint",
-        "完整排名与全局统计可在本届「查看公示」页打开。评委评价仅在投票统计期产生，并于统计/公示期置顶。",
+        isJudgePhase(id.split("/")[0])
+          ? "完整排名可在本届「投票统计」页查看。特别奖与评委评语将在结果公示阶段公布。"
+          : "完整排名、特别奖与评委评语可在本届「结果公示」页查看。",
       ),
     );
     return panel;
@@ -12235,23 +12203,15 @@
       cardBody.appendChild(metaDetails);
 
       if (anonymous) {
-        var publicAwards = editionAwardsData(edition.slug);
-        var wasAwarded =
-          publicAwards &&
-          publicAwards.published &&
-          Array.isArray(publicAwards.specialAwards) &&
-          publicAwards.specialAwards.some(function (award) { return award.workId === id; });
         metaDetailsBody.appendChild(
           el(
             "p",
             "work-anon-note",
             isArchivedEdition(edition)
               ? "历史资料未载明作者，按原件封存"
-              : isPublicPhase(edition.slug)
-                ? wasAwarded
-                  ? "本作已获奖，作者信息待补充"
-                  : "未获奖励的作品将匿名封存"
-                : "作者身份将在结果公示时按获奖范围解封",
+              : isJudgePhase(edition.slug) || isPublicPhase(edition.slug)
+                ? "作者信息待补充"
+                : "作者身份将在投票统计阶段公开",
           ),
         );
       }
@@ -12447,7 +12407,7 @@
       if (authorNote) sheet.appendChild(authorNote);
       sheet.appendChild(renderRatingSectionDivider());
       sheet.appendChild(renderScorePanel(id));
-      if (isPublicPhase(edition.slug)) {
+      if (isJudgePhase(edition.slug) || isPublicPhase(edition.slug)) {
         sheet.appendChild(renderWorkPublicStats(id, work));
       }
       sheet.appendChild(renderCommentPanel(id));
@@ -12525,7 +12485,7 @@
           console.error(e);
         });
     }
-    if (isPublicPhase(edition.slug) && !cloudInsightsLoaded[edition.slug]) {
+    if ((isJudgePhase(edition.slug) || isPublicPhase(edition.slug)) && !cloudInsightsLoaded[edition.slug]) {
       loadCloudEditionInsights(edition.slug).then(function () {
         if (stillHere()) paint(true);
       }).catch(function (e) { console.error(e); });
@@ -12767,7 +12727,7 @@
     refs.editionSelect.value = edition.slug;
 
     if (workSlug === "__results") {
-      if (!isAdmin() && !isPublicPhase(edition.slug) && !historicalResultsOf(edition)) {
+      if (!isAdmin() && !isJudgePhase(edition.slug) && !isPublicPhase(edition.slug) && !historicalResultsOf(edition)) {
         location.hash = "#/";
         return;
       }
