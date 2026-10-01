@@ -676,6 +676,7 @@
     fontSize: 18,
     lineHeight: 1.95,
     width: 720,
+    selection: 0,
   };
 
   function loadReadingSettings() {
@@ -12368,6 +12369,7 @@
         body.style.fontSize = Number(readerSettings.fontSize) + "px";
         body.style.lineHeight = String(readerSettings.lineHeight);
         frame.style.setProperty("--reader-sheet-width", Number(readerSettings.width) + "px");
+        body.classList.toggle("is-selection-strong", Number(readerSettings.selection) === 1);
         if (savedPosition) {
           window.requestAnimationFrame(function () {
             if (activeReadingId !== id) return;
@@ -12386,6 +12388,7 @@
       addSettingGroup("fontSize", "字号", [[16, "小"], [18, "标准"], [20, "大"], [22, "特大"]]);
       addSettingGroup("lineHeight", "行距", [[1.75, "紧凑"], [1.95, "标准"], [2.15, "宽松"]]);
       addSettingGroup("width", "版心", [[640, "窄"], [720, "标准"], [820, "宽"]]);
+      addSettingGroup("selection", "选中", [[0, "标准"], [1, "醒目"]]);
       refreshSettingButtons();
       applyReaderSettings();
       aaButton.addEventListener("click", function () {
