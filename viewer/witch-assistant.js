@@ -117,6 +117,11 @@
       ["article-6", "这里离清醒世界有一点远。你可以继续下潜了。"],
       ["article-7", "再往下一点，就是深眠的阶梯。"],
     ],
+    disqualified: [
+      ["disqualified-1", "朱笔已经落下了。这一卷还在架上，只是不再有名次。"],
+      ["disqualified-2", "嘘……这份档案被除名了。字还在，执笔的却不是调查员的手。"],
+      ["disqualified-3", "馆规很短：亲手写下的字，才进得了评议单。"],
+    ],
     night: [
       ["night-1", "灯终于关了。现在才比较像营业时间。"],
       ["night-2", "夜色很好。不用怀疑，你还在梦里。"],
@@ -1216,6 +1221,7 @@
   }
 
   function dialogueForContext(nextContext) {
+    if (nextContext.pageType === "article" && nextContext.disqualified) return DIALOGUE.disqualified;
     if (nextContext.pageType === "results" && nextContext.phase === "统计") return DIALOGUE.statistics;
     return DIALOGUE[nextContext.pageType] || DIALOGUE.home;
   }
@@ -1226,6 +1232,7 @@
       nextContext.editionSlug,
       nextContext.phase,
       nextContext.workId,
+      nextContext.disqualified ? "disqualified" : "",
     ].join("|");
   }
 
@@ -1368,7 +1375,7 @@
     var actions = [];
     if (context.pageType === "article") {
       if (document.querySelector(".section-nav")) actions.push(["本文目录", "toc"]);
-      actions.push(["跳到评议", "review"]);
+      if (!context.disqualified) actions.push(["跳到评议", "review"]);
       actions.push(["全馆搜索", "search"]);
       actions.push([currentEditionLabel(), "catalogue"]);
     } else if (context.pageType === "edition") {

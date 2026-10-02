@@ -1059,7 +1059,8 @@ function recentSpotlightIds(editionSlug, date, cooldownDays) {
 }
 
 function spotlightCandidateRows(config, editionSlug, date) {
-  return config.catalogueWorkIds.map((workId) => {
+  const excluded = disqualifiedIdsOf(getSettings(), editionSlug);
+  return config.catalogueWorkIds.filter((workId) => !excluded.has(workId)).map((workId) => {
     const ratingRow = db
       .prepare("SELECT COUNT(*) AS count FROM counted_ratings WHERE workId = ?")
       .get(workId);
@@ -1198,10 +1199,11 @@ function generateSpotlightDaily(settings, editionSlug, date, rebuildToday) {
 }
 
 function publicSpotlightResult(editionSlug, date, rows) {
+  const excluded = disqualifiedIdsOf(getSettings(), editionSlug);
   return {
     editionSlug,
     date,
-    items: rows.map((row) => ({
+    items: rows.filter((row) => !excluded.has(row.workId)).map((row) => ({
       workId: row.workId,
       source: row.source,
       publicLabel: row.publicLabel,
@@ -1441,8 +1443,9 @@ function searchRecommendations() {
     LEFT JOIN rating_activity r ON r.workId = works.workId
     LEFT JOIN comment_activity c ON c.workId = works.workId
   `).all();
+  const disqualified = getSettings().disqualifiedWorks || {};
   const candidates = rows
-    .filter((row) => /^[A-Za-z0-9_-]{1,64}\//.test(String(row.workId || "")))
+    .filter((row) => /^[A-Za-z0-9_-]{1,64}\//.test(String(row.workId || "")) && !disqualified[row.workId])
     .map((row) => {
       const ratingCount = Number(row.ratingCount) || 0;
       const commentCount = Number(row.commentCount) || 0;
@@ -1478,9 +1481,28 @@ function searchRecommendations() {
   return picked.map(({ score, activity, ratingWeight, commentWeight, ...row }) => row);
 }
 
-function editionLeaderboard(editionSlug) {
+// 除名作品：不计名次、不进评分分布、不再接受评分；正文与评论照常保留。
+const DISQUALIFY_REASON_DEFAULT =
+  "有确切证据显示，本档案由 AI 深度参与写成，不符合本群的写作规范。档案馆不评判 AI 写作本身的是非；只是这里收藏的，向来是调查员亲手写下的字。";
+
+function disqualifiedWorksOf(settings, editionSlug) {
+  const all = (settings && settings.disqualifiedWorks) || {};
+  return Object.fromEntries(Object.entries(all).filter(([workId]) => workId.startsWith(editionSlug + "/")));
+}
+
+function disqualifiedIdsOf(settings, editionSlug) {
+  return new Set(Object.keys(disqualifiedWorksOf(settings, editionSlug)));
+}
+
+function disqualifiedListOf(settings, editionSlug) {
+  return Object.entries(disqualifiedWorksOf(settings, editionSlug))
+    .map(([workId, entry]) => ({ workId, reason: entry.reason, at: entry.at }))
+    .sort((a, b) => a.workId.localeCompare(b.workId));
+}
+
+function editionLeaderboard(editionSlug, excluded = new Set()) {
   return reportWorkStats(editionSlug)
-    .filter((row) => Number(row.ratingCount) > 0)
+    .filter((row) => Number(row.ratingCount) > 0 && !excluded.has(row.workId))
     .sort((a, b) =>
       Number(b.totalAvg) - Number(a.totalAvg) ||
       Number(b.ratingCount) - Number(a.ratingCount) ||
@@ -1494,7 +1516,7 @@ function editionLeaderboard(editionSlug) {
     }));
 }
 
-function editionScoreDistributions(editionSlug) {
+function editionScoreDistributions(editionSlug, excluded = new Set()) {
   const dimensions = ["chuanlu", "dangan", "overall"];
   const selections = dimensions.flatMap((dimension) =>
     [1, 2, 3, 4, 5].map(
@@ -1508,7 +1530,7 @@ function editionScoreDistributions(editionSlug) {
     GROUP BY workId
   `).all(editionSlug + "/%");
   const distributions = {};
-  rows.forEach((row) => {
+  rows.filter((row) => !excluded.has(row.workId)).forEach((row) => {
     distributions[row.workId] = {
       ratingCount: Number(row.ratingCount) || 0,
       ...Object.fromEntries(dimensions.map((dimension) => [
@@ -1534,7 +1556,9 @@ function publicPublication(publication) {
 function editionAuthorReveals(settings, editionSlug) {
   const authorReveals = {};
   const bindings = settings.authorBindings || {};
+  const excluded = disqualifiedIdsOf(settings, editionSlug);
   manifestCatalogueIds(editionSlug).forEach((workId) => {
+    if (excluded.has(workId)) return;
     const qq = String(bindings[workId] || "");
     const author = qq && getUser(qq);
     if (author && author.nickname) authorReveals[workId] = author.nickname;
@@ -1548,8 +1572,9 @@ function publicEditionAwards(settings, editionSlug, leaderboard) {
     return { published: true, authorRevealRankLimit: 0, awardedWorkIds: [], authorReveals: {}, specialAwards: [] };
   }
   const catalogueIds = new Set(manifestCatalogueIds(editionSlug));
+  const excluded = disqualifiedIdsOf(settings, editionSlug);
   const specialAwards = (Array.isArray(config.specialAwards) ? config.specialAwards : [])
-    .filter((award) => award && catalogueIds.has(String(award.workId || "")))
+    .filter((award) => award && catalogueIds.has(String(award.workId || "")) && !excluded.has(String(award.workId || "")))
     .map((award) => ({
       name: String(award.name || ""),
       workId: String(award.workId || ""),
@@ -1580,7 +1605,8 @@ function createPublication(settings, editionSlug, confirmedBy) {
   if (publicationOf(editionSlug)) throw new Error("本届已有正式公示");
   const catalogueIds = new Set(manifestCatalogueIds(editionSlug));
   if (!catalogueIds.size) throw new Error("本届目录清单为空，无法发布公示");
-  const leaderboard = editionLeaderboard(editionSlug);
+  const excluded = disqualifiedIdsOf(settings, editionSlug);
+  const leaderboard = editionLeaderboard(editionSlug, excluded);
   if (leaderboard.some((row) => !catalogueIds.has(row.workId))) {
     throw new Error("评分中存在目录外作品，请核对后再公示");
   }
@@ -1590,9 +1616,10 @@ function createPublication(settings, editionSlug, confirmedBy) {
     publishedAt,
     confirmedBy,
     leaderboard,
-    distributions: editionScoreDistributions(editionSlug),
+    distributions: editionScoreDistributions(editionSlug, excluded),
     authorReveals: editionAuthorReveals(settings, editionSlug),
     awards: publicEditionAwards(settings, editionSlug, leaderboard),
+    disqualified: disqualifiedListOf(settings, editionSlug),
   };
   db.prepare("INSERT INTO edition_publications (editionSlug, publishedAt, snapshot) VALUES (?, ?, ?)")
     .run(editionSlug, publishedAt, JSON.stringify(publication));
@@ -1679,6 +1706,8 @@ async function handle(action, payload, auth, ctx) {
         editions: settings.editions || {},
         authorBindings: visibleAuthorBindings,
         readingGuides: Array.isArray(settings.readingGuides) ? settings.readingGuides : null,
+        disqualifiedWorks: Object.fromEntries(Object.entries(settings.disqualifiedWorks || {})
+          .map(([workId, entry]) => [workId, { reason: entry.reason, at: entry.at }])),
       };
       if (session && session.role === "admin") {
         safeSettings.memberDirectory = settings.memberDirectory || [];
@@ -1720,6 +1749,7 @@ async function handle(action, payload, auth, ctx) {
       const rankingsAvailable = Boolean(
         publication || st.phase === "统计",
       );
+      const excluded = disqualifiedIdsOf(settings, editionSlug);
       const heat = workStats.map((row) => ({
         workId: row.workId,
         commentCount: row.commentCount,
@@ -1728,12 +1758,13 @@ async function handle(action, payload, auth, ctx) {
       return {
         rankingsAvailable,
         heat,
-        leaderboard: publication ? publication.leaderboard : rankingsAvailable ? editionLeaderboard(editionSlug) : [],
-        distributions: publication ? publication.distributions : rankingsAvailable ? editionScoreDistributions(editionSlug) : null,
+        leaderboard: publication ? publication.leaderboard : rankingsAvailable ? editionLeaderboard(editionSlug, excluded) : [],
+        distributions: publication ? publication.distributions : rankingsAvailable ? editionScoreDistributions(editionSlug, excluded) : null,
         authorReveals: publication
           ? publication.authorReveals || publication.awards.authorReveals || {}
           : rankingsAvailable ? editionAuthorReveals(settings, editionSlug) : {},
         publication: publicPublication(publication),
+        disqualified: publication ? publication.disqualified || [] : disqualifiedListOf(settings, editionSlug),
       };
     }
 
@@ -2321,6 +2352,9 @@ async function handle(action, payload, auth, ctx) {
       const eligibleWorkIds = manifestCatalogueIds(editionSlug);
       if (eligibleWorkIds.indexOf(workId) === -1) {
         throw new Error("这份档案不在当前届别的可评作品目录中。");
+      }
+      if (disqualifiedIdsOf(settings, editionSlug).has(workId)) {
+        throw new Error("这份档案已被除名，不再接受评分。");
       }
       const chuanlu = Number(payload.chuanlu);
       const dangan = Number(payload.dangan);
@@ -3070,6 +3104,25 @@ async function handle(action, payload, auth, ctx) {
       }
       saveSettings(next);
       return { settings: next };
+    }
+
+    case "adminSetWorkDisqualified": {
+      if (!user || session.role !== "admin") throw new Error("需要管理员");
+      const workId = String(payload.workId || "");
+      const editionSlug = workId.split("/")[0];
+      if (manifestCatalogueIds(editionSlug).indexOf(workId) === -1) throw new Error("作品不在当前届别目录中");
+      if (publicationOf(editionSlug)) throw new Error("本届已正式公示，名次已封存，不能再除名或撤销");
+      const next = { ...(settings.disqualifiedWorks || {}) };
+      if (payload.disqualified) {
+        const reason = String(payload.reason || "").trim() || DISQUALIFY_REASON_DEFAULT;
+        if (reason.length > 400) throw new Error("除名说明不能超过 400 字");
+        next[workId] = { reason, at: (next[workId] && next[workId].at) || new Date().toISOString(), by: user.qq };
+      } else {
+        delete next[workId];
+      }
+      settings.disqualifiedWorks = next;
+      saveSettings(settings);
+      return { disqualifiedWorks: next };
     }
 
     case "adminSetUserEnabled": {

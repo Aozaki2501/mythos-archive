@@ -1311,6 +1311,12 @@
     return phaseOf(slug) === "评分";
   }
 
+  // 除名记录由服务端设置下发：{ reason, at }；被除名的作品不计名次、不再评分。
+  function disqualificationOf(id) {
+    var map = store.settings && store.settings.disqualifiedWorks;
+    return (map && map[id]) || null;
+  }
+
   function isPublicPhase(slug) {
     if (isArchivedEdition(slug)) return false;
     return phaseOf(slug) === "公示";
@@ -5152,6 +5158,18 @@
     body.appendChild(awardConfigButton);
 
     body.appendChild(el("hr", "modal-rule"));
+    body.appendChild(el("h3", "modal-sub", "作品除名"));
+    body.appendChild(el("p", "modal-meta", "除名后不计名次、不再接受评分，作品页盖除名令；正文与评论保留。正式公示后名次封存，不能再除名或撤销。"));
+    var disqualifyButton = el("button", "btn-ghost", "管理除名作品");
+    disqualifyButton.type = "button";
+    disqualifyButton.disabled = !USE_CLOUD;
+    disqualifyButton.title = USE_CLOUD ? "" : "离线单文件版未连接管理接口";
+    disqualifyButton.addEventListener("click", function () {
+      openDisqualifyModal(slug);
+    });
+    body.appendChild(disqualifyButton);
+
+    body.appendChild(el("hr", "modal-rule"));
     body.appendChild(el("h3", "modal-sub", "首页聚光"));
     body.appendChild(
       el(
@@ -5345,6 +5363,77 @@
     body.appendChild(feedbackBlock);
 
     openModal("管理面板", body);
+  }
+
+  var DISQUALIFY_REASON_TEXT = "有确切证据显示，本档案由 AI 深度参与写成，不符合本群的写作规范。档案馆不评判 AI 写作本身的是非；只是这里收藏的，向来是调查员亲手写下的字。";
+
+  function openDisqualifyModal(editionSlug) {
+    var edition = findEdition(editionSlug);
+    if (!edition || !isAdmin()) return;
+    var body = el("div", "modal-body disqualify-admin");
+    body.appendChild(backToAdminButton());
+    var status = el("p", "modal-meta");
+    function save(id, disqualified, reason, button) {
+      button.disabled = true;
+      status.textContent = "正在保存…";
+      window.MythosAPI.call("adminSetWorkDisqualified", { workId: id, disqualified: disqualified, reason: reason }).then(function (data) {
+        var publicMap = {};
+        Object.keys(data.disqualifiedWorks || {}).forEach(function (key) {
+          var entry = data.disqualifiedWorks[key];
+          publicMap[key] = { reason: entry.reason, at: entry.at };
+        });
+        store.settings.disqualifiedWorks = publicMap;
+        persist();
+        openDisqualifyModal(editionSlug);
+        route();
+      }).catch(function (error) {
+        button.disabled = false;
+        status.textContent = error.message || String(error);
+      });
+    }
+    var current = edition.works.filter(function (work) { return disqualificationOf(workId(edition.slug, work.slug)); });
+    body.appendChild(el("h3", "modal-sub", "已除名"));
+    if (!current.length) body.appendChild(el("p", "modal-meta", "本届暂无除名作品。"));
+    current.forEach(function (work) {
+      var id = workId(edition.slug, work.slug);
+      var row = el("div", "admin-row");
+      row.appendChild(el("span", null, String(work.no).padStart(3, "0") + " · " + work.title));
+      var undo = el("button", "btn-ghost btn-tiny", "撤销除名");
+      undo.type = "button";
+      undo.addEventListener("click", function () {
+        if (!window.confirm("撤销《" + work.title + "》的除名？撤销后它会重新计入名次。")) return;
+        save(id, false, "", undo);
+      });
+      row.appendChild(undo);
+      body.appendChild(row);
+    });
+    body.appendChild(el("h3", "modal-sub", "新增除名"));
+    var select = el("select", "auth-input");
+    edition.works.forEach(function (work) {
+      var id = workId(edition.slug, work.slug);
+      if (disqualificationOf(id)) return;
+      var option = el("option", null, String(work.no).padStart(3, "0") + " · " + work.title);
+      option.value = id;
+      select.appendChild(option);
+    });
+    body.appendChild(select);
+    body.appendChild(el("label", "field-label", "除名说明（显示在作品页除名令上）"));
+    var reason = el("textarea", "auth-input");
+    reason.rows = 4;
+    reason.maxLength = 400;
+    reason.value = DISQUALIFY_REASON_TEXT;
+    body.appendChild(reason);
+    var submit = el("button", "btn", "盖章除名");
+    submit.type = "button";
+    submit.addEventListener("click", function () {
+      var option = select.options[select.selectedIndex];
+      if (!option) return;
+      if (!window.confirm("确认除名「" + option.textContent + "」？它将不计名次、不再接受评分。")) return;
+      save(select.value, true, reason.value.trim(), submit);
+    });
+    body.appendChild(submit);
+    body.appendChild(status);
+    openModal("作品除名 · " + (edition.shortName || edition.name || editionSlug), body);
   }
 
   function openEditionAwardConfigModal(editionSlug) {
@@ -8788,6 +8877,30 @@
           officialResults ? "按三项均分排列 · 点击一行展开评分分布与评语" : "按三项均分排列 · 点击一行展开评分人数与分布",
           officialResults ? "02" : "01", overallAverageLabel(edition));
         if (!officialRows.length) sheet.appendChild(el("p", "intro-text", "本届尚无有效评分，暂无名次可展示。"));
+        var disqualifiedRows = (insight.disqualified || []).map(function (entry) {
+          var work = edition.works.filter(function (item) { return workId(edition.slug, item.slug) === entry.workId; })[0];
+          return work && { work: work, entry: entry };
+        }).filter(Boolean);
+        if (disqualifiedRows.length) {
+          var note = el("section", "results-disqualified");
+          var noteHead = el("div", "results-disqualified-head");
+          noteHead.appendChild(createBoxSeal("除名", "seal-tilt-l results-disqualified-seal"));
+          noteHead.appendChild(el("h3", "results-disqualified-title", "除名记录"));
+          note.appendChild(noteHead);
+          note.appendChild(el("p", "results-disqualified-copy", "以下档案经查有确切证据显示为 AI 深度参与写成，不符合本群的写作规范，不计名次；正文仍封存在馆内。"));
+          var noteList = el("ul", "results-disqualified-list");
+          disqualifiedRows.forEach(function (item) {
+            var li = el("li");
+            var link = el("a");
+            link.href = "#/" + edition.slug + "/" + encodeURIComponent(item.work.slug);
+            link.appendChild(el("span", "results-disqualified-work", "第 " + String(item.work.no).padStart(3, "0") + " 号《" + item.work.title + "》"));
+            link.appendChild(el("span", "results-disqualified-more", "查看除名令"));
+            li.appendChild(link);
+            noteList.appendChild(li);
+          });
+          note.appendChild(noteList);
+          sheet.appendChild(note);
+        }
       }
       refs.content.appendChild(sheet);
       window.scrollTo(0, 0);
@@ -9359,6 +9472,7 @@
       editionName: edition ? edition.shortName || edition.name || "" : "",
       workId: work && edition ? workId(edition.slug, work.slug) : null,
       workTitle: work ? work.title || null : null,
+      disqualified: !!(work && edition && disqualificationOf(workId(edition.slug, work.slug))),
       phase: edition ? phaseOf(edition.slug) : null,
       isNightMode: document.documentElement.dataset.theme === "dark",
       sidebarCollapsed: !!(refs.layout && refs.layout.classList.contains("sidebar-collapsed")),
@@ -11794,6 +11908,10 @@
           saveCatalogueReturnPosition(edition.slug);
         });
         title.appendChild(el("span", "edition-index-title-text", work.title));
+        if (disqualificationOf(workId(edition.slug, work.slug))) {
+          row.classList.add("is-disqualified");
+          title.appendChild(createTagSeal("除名", "edition-index-disqualified"));
+        }
         var spotlightInfo = spotlightForWork(spotlightCache[edition.slug], edition, work);
         if (spotlightInfo && spotlightInfo.date) {
           var spotlightBadge = el("span", "edition-index-spotlight", "聚光");
@@ -12000,6 +12118,47 @@
     return divider;
   }
 
+  // 除名令：盖在正文之前的一张档案卡。只记作品编号，不点名作者；正文照原样封存。
+  function renderDisqualificationOrder(edition, work, entry) {
+    var order = el("section", "disqualify-order");
+    order.setAttribute("aria-label", "除名令");
+    var top = el("div", "disqualify-order-top");
+    top.appendChild(el("span", "disqualify-order-label", "幻梦境档案馆 · 除名令"));
+    top.appendChild(el("span", "disqualify-order-number", "档号 " + edition.year + " / " + String(work.no).padStart(3, "0")));
+    order.appendChild(top);
+    var main = el("div", "disqualify-order-main");
+    main.appendChild(el("p", "disqualify-order-kicker", "依馆规，下列档案自即日起"));
+    main.appendChild(el("h2", "disqualify-order-title", "逐出评议，除名存档"));
+    var struck = el("p", "disqualify-order-entry");
+    struck.appendChild(el("span", "disqualify-order-entry-label", "原登记"));
+    var entryText = el("span", "disqualify-order-struck");
+    entryText.appendChild(el("span", null, "第 " + String(work.no).padStart(3, "0") + " 号《" + work.title + "》"));
+    entryText.appendChild(el("span", "disqualify-order-stroke"));
+    struck.appendChild(entryText);
+    main.appendChild(struck);
+    main.appendChild(el("p", "disqualify-order-reason", entry.reason || ""));
+    var verdicts = el("dl", "disqualify-order-verdicts");
+    [
+      ["名次", "不计"],
+      ["评分", "作废"],
+      ["执笔者", "绝罚"],
+      ["正文", "照原样封存，留给后来者借鉴"],
+    ].forEach(function (pair) {
+      var item = el("div", "disqualify-order-verdict");
+      item.appendChild(el("dt", null, pair[0]));
+      item.appendChild(el("dd", null, pair[1]));
+      verdicts.appendChild(item);
+    });
+    main.appendChild(verdicts);
+    order.appendChild(main);
+    var foot = el("p", "disqualify-order-foot");
+    foot.appendChild(el("span", null, "馆务会议 立"));
+    if (entry.at) foot.appendChild(el("span", "disqualify-order-date", formatShortDate(entry.at)));
+    order.appendChild(foot);
+    order.appendChild(createBoxSeal("除名", "seal-tilt-r disqualify-order-seal"));
+    return order;
+  }
+
   function renderWork(edition, work) {
     clear(refs.content);
     activeReaderRerender = null;
@@ -12012,7 +12171,8 @@
     var pendingPanelJump = "";
     var paintedContent = null;
 
-    var jumpPanelId = votingOpen(edition.slug) ? "score-panel" : "comments-panel";
+    var canRateHere = votingOpen(edition.slug) && !disqualificationOf(id);
+    var jumpPanelId = canRateHere ? "score-panel" : "comments-panel";
 
     function jumpToPanel(sheet) {
       pendingPanelJump = jumpPanelId;
@@ -12222,6 +12382,7 @@
         );
       }
 
+      var disqualification = disqualificationOf(id);
       var spotlightInfo = spotlightForWork(spotlightCache[edition.slug], edition, work);
       var spotlightNote = el("p", "work-spotlight-note");
       if (spotlightInfo && spotlightInfo.date) {
@@ -12275,10 +12436,10 @@
         "btn-ghost work-jump-btn jump-to-score",
       );
       jumpButton.type = "button";
-      setIconLabel(jumpButton, "i-down", votingOpen(edition.slug) ? "跳到评分区" : "跳到评论区");
+      setIconLabel(jumpButton, "i-down", canRateHere ? "跳到评分区" : "跳到评论区");
       jumpButton.setAttribute(
         "aria-label",
-        votingOpen(edition.slug) ? "跳到文章底部评分区" : "跳到文章底部评论区",
+        canRateHere ? "跳到文章底部评分区" : "跳到文章底部评论区",
       );
       jumpButton.addEventListener("click", function () {
         jumpToPanel(sheet);
@@ -12401,6 +12562,7 @@
       card.appendChild(el("span", "work-card-hole"));
       frame.appendChild(compactBar);
       sheet.appendChild(head);
+      if (disqualification) sheet.appendChild(renderDisqualificationOrder(edition, work, disqualification));
       sheet.appendChild(body);
       sheet.appendChild(renderWorkEndMark(edition, work, contentOverride));
       var historicalReviews = renderHistoricalWorkReviews(edition, work);
@@ -12413,10 +12575,12 @@
       }
       var authorNote = renderAuthorNotePanel(id, work);
       if (authorNote) sheet.appendChild(authorNote);
-      sheet.appendChild(renderRatingSectionDivider());
-      sheet.appendChild(renderScorePanel(id));
-      if (isJudgePhase(edition.slug) || isPublicPhase(edition.slug)) {
-        sheet.appendChild(renderWorkPublicStats(id, work));
+      if (!disqualification) {
+        sheet.appendChild(renderRatingSectionDivider());
+        sheet.appendChild(renderScorePanel(id));
+        if (isJudgePhase(edition.slug) || isPublicPhase(edition.slug)) {
+          sheet.appendChild(renderWorkPublicStats(id, work));
+        }
       }
       sheet.appendChild(renderCommentPanel(id));
       var relatedGuides = renderRelatedGuides(edition, work);

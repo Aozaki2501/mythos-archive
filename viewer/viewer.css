@@ -9614,3 +9614,99 @@ html.theme-switching::view-transition-new(root) {
     padding-left: 128px;
   }
 }
+
+/* 除名：作品页除名令、目录字签与公示页记录。只用卷色变量与墨迹印章 */
+
+.disqualify-order {
+  position: relative;
+  margin: 28px 0 36px;
+  border: 1px solid var(--accent);
+  outline: 1px solid var(--line);
+  outline-offset: 4px;
+  background: var(--panel);
+}
+.disqualify-order-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 26px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: .16em;
+}
+.disqualify-order-number { color: var(--accent); font-family: var(--archive-number-font); font-size: 15px; letter-spacing: .08em; white-space: nowrap; }
+.disqualify-order-main { padding: 26px 34px 8px; }
+.disqualify-order-kicker { margin: 0; color: var(--muted); font-family: var(--article-font); font-size: 13px; letter-spacing: .2em; }
+.disqualify-order-title { margin: 6px 0 18px; color: var(--heading); font-family: var(--display-font); font-size: 28px; font-weight: 400; letter-spacing: .12em; }
+.disqualify-order-entry { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; margin: 0 0 16px; }
+.disqualify-order-entry-label { color: var(--muted); font-size: 12px; letter-spacing: .16em; }
+.disqualify-order-struck { position: relative; color: var(--muted); font-family: var(--article-font); font-size: 17px; }
+/* 朱笔一划：从左向右划过原登记 */
+.disqualify-order-stroke {
+  position: absolute;
+  left: -4px;
+  right: -6px;
+  top: 52%;
+  height: 3px;
+  background: var(--accent);
+  border-radius: var(--radius);
+  transform: rotate(-1.5deg) scaleX(0);
+  transform-origin: left center;
+  animation: disqualify-stroke 520ms 240ms cubic-bezier(.6, .1, .3, 1) forwards;
+  opacity: .85;
+}
+@keyframes disqualify-stroke {
+  to { transform: rotate(-1.5deg) scaleX(1); }
+}
+.disqualify-order-reason { margin: 0 0 18px; max-width: 40em; color: var(--body); font-family: var(--article-font); font-size: 15px; font-weight: 400; line-height: 1.9; }
+.disqualify-order-verdicts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 28px; margin: 0; border-top: 1px dashed var(--line-strong); }
+.disqualify-order-verdict { display: flex; align-items: baseline; gap: 14px; padding: 10px 0; border-bottom: 1px dashed var(--line-strong); }
+.disqualify-order-verdict dt { flex: none; width: 4em; color: var(--muted); font-size: 12px; letter-spacing: .16em; }
+.disqualify-order-verdict dd { margin: 0; color: var(--text); font-family: var(--article-font); }
+.disqualify-order-verdict:nth-child(-n+3) dd { color: var(--accent); letter-spacing: .2em; }
+.disqualify-order-foot { display: flex; justify-content: flex-end; gap: 14px; margin: 0; padding: 14px 34px 20px; color: var(--muted); font-family: var(--article-font); font-size: 13px; letter-spacing: .12em; }
+.disqualify-order-date { font-family: var(--archive-number-font); }
+.disqualify-order-seal {
+  position: absolute;
+  top: 66px;
+  right: 34px;
+  width: 104px;
+  height: auto;
+  pointer-events: none;
+  animation: disqualify-stamp 380ms 700ms cubic-bezier(.2, .8, .2, 1) both;
+}
+@keyframes disqualify-stamp {
+  0% { opacity: 0; transform: rotate(6deg) scale(1.8); }
+  100% { opacity: .9; transform: rotate(6deg) scale(1); }
+}
+
+.edition-index-disqualified { flex: none; width: auto; height: 16px; }
+.edition-index-row.is-disqualified .edition-index-title-text { color: var(--muted); }
+
+.results-disqualified { margin: 32px 0 0; padding: 18px 22px; border: 1px dashed var(--line-strong); background: var(--panel); }
+.results-disqualified-head { display: flex; align-items: center; gap: 14px; }
+.results-disqualified-seal { width: 64px; height: auto; }
+.results-disqualified-title { margin: 0; font-family: var(--display-font); font-size: 18px; font-weight: 400; letter-spacing: .12em; }
+.results-disqualified-copy { margin: 10px 0 8px; color: var(--muted); font-size: 13px; line-height: 1.8; }
+.results-disqualified-list { margin: 0; padding: 0; list-style: none; }
+.results-disqualified-list li { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 0; font-family: var(--article-font); }
+.results-disqualified-list a { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; color: var(--text); text-decoration: none; }
+.results-disqualified-work { text-decoration: line-through; text-decoration-color: var(--accent); text-decoration-thickness: 2px; }
+.results-disqualified-more { color: var(--accent); font-size: 13px; }
+.results-disqualified-list a:hover .results-disqualified-more { text-decoration: underline; }
+
+@media (max-width: 640px) {
+  .disqualify-order-top { padding: 10px 16px; letter-spacing: .1em; }
+  .disqualify-order-main { padding: 20px 18px 6px; }
+  .disqualify-order-title { font-size: 23px; }
+  .disqualify-order-verdicts { grid-template-columns: 1fr; }
+  .disqualify-order-foot { padding: 12px 18px 18px; }
+  .disqualify-order-seal { top: 56px; right: 14px; width: 72px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .disqualify-order-stroke { animation: none; transform: rotate(-1.5deg) scaleX(1); }
+  .disqualify-order-seal { animation: none; }
+}

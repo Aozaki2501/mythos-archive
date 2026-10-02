@@ -167,6 +167,52 @@ test("阶段只能由两位不同管理员确认，正式结果保持固定", as
   assert.throws(() => db.prepare("DELETE FROM edition_publications WHERE editionSlug = '2026'").run(), /不可删除/);
 });
 
+test("除名作品不计名次、不收评分，公示快照记录除名且之后不可撤销", async (t) => {
+  const { call, db } = await fixture(t);
+  const admin = "token-11111";
+  db.prepare("INSERT INTO ratings (id, workId, qq, chuanlu, dangan, overall, t) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run("r2", workIds[1], "11111", 4, 4, 4, new Date().toISOString());
+  const raw = JSON.parse(db.prepare("SELECT value FROM settings WHERE key = 'main'").get().value);
+  raw.awardConfigs["2026"].specialAwards.push({ name: "不应出现", workId: workIds[0], excerpt: "", review: "" });
+  db.prepare("UPDATE settings SET value = ? WHERE key = 'main'").run(JSON.stringify(raw));
+
+  const before = await call("getEditionInsights", { editionSlug: "2026" });
+  assert.equal(before.leaderboard[0].workId, workIds[0]);
+  assert.deepEqual(before.disqualified, []);
+  await assert.rejects(call("adminSetWorkDisqualified", { workId: workIds[0], disqualified: true }), /需要管理员/);
+  await assert.rejects(call("adminSetWorkDisqualified", { workId: "2026/不存在", disqualified: true }, admin), /不在当前届别/);
+  await call("adminSetWorkDisqualified", { workId: workIds[0], disqualified: true }, admin);
+
+  const after = await call("getEditionInsights", { editionSlug: "2026" });
+  assert.deepEqual(after.leaderboard.map((row) => [row.rank, row.workId]), [[1, workIds[1]]]);
+  assert.equal(after.distributions[workIds[0]], undefined);
+  assert.equal(after.authorReveals[workIds[0]], undefined);
+  assert.equal(after.authorReveals[workIds[2]], "作者33333");
+  assert.equal(after.disqualified[0].workId, workIds[0]);
+  assert.match(after.disqualified[0].reason, /AI 深度参与/);
+  const publicEntry = (await call("bootstrap")).settings.disqualifiedWorks[workIds[0]];
+  assert.ok(publicEntry.at);
+  assert.equal(publicEntry.by, undefined, "公开设置不暴露操作管理员");
+
+  db.prepare("INSERT INTO tokens (token, qq, role, exp) VALUES (?, ?, 'member', ?)").run("token-33333", "33333", Date.now() + 60000);
+  const rating = JSON.parse(db.prepare("SELECT value FROM settings WHERE key = 'main'").get().value);
+  rating.editions["2026"].phase = "评分";
+  db.prepare("UPDATE settings SET value = ? WHERE key = 'main'").run(JSON.stringify(rating));
+  await assert.rejects(call("submitRating", { workId: workIds[0], chuanlu: 5, dangan: 5, overall: 5 }, "token-33333"), /已被除名/);
+  rating.editions["2026"].phase = "统计";
+  db.prepare("UPDATE settings SET value = ? WHERE key = 'main'").run(JSON.stringify(rating));
+
+  await call("adminConfirmEditionPhase", { editionSlug: "2026" }, admin);
+  await call("adminConfirmEditionPhase", { editionSlug: "2026" }, "token-22222");
+  const published = await call("getEditionInsights", { editionSlug: "2026" });
+  assert.ok(published.publication);
+  assert.deepEqual(published.leaderboard, after.leaderboard);
+  assert.equal(published.disqualified[0].workId, workIds[0]);
+  const awards = await call("getEditionAwards", { editionSlug: "2026" });
+  assert.deepEqual(awards.specialAwards.map((award) => award.workId), [workIds[1]]);
+  await assert.rejects(call("adminSetWorkDisqualified", { workId: workIds[0], disqualified: false }, admin), /已正式公示/);
+});
+
 test("旧公示快照保持原有作者公开范围", async (t) => {
   const { call, db } = await fixture(t);
   const legacy = {
