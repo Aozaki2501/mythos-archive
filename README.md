@@ -2,7 +2,7 @@
 
 历届「神话设计大赛」作品的阅读、检索、评分与评论站点。线上地址：<https://dreamland.l.cd>
 
-收录 2020–2026 共七届、344 篇参赛作品。站点做成一座“档案馆”的样子：进门有梦门开场，作品按届别成卷，读者以“调查员”身份登录后可以评分、评论、收藏到书架，本届比赛的征文、评分、统计、公示四个阶段也在站内完成。
+线上站点收录 2020–2026 共七届、344 篇参赛作品。站点做成一座“档案馆”的样子：进门有梦门开场，作品按届别成卷，读者以“调查员”身份登录后可以评分、评论、收藏到书架，本届比赛的征文、评分、统计、公示四个阶段也在站内完成。
 
 ## 功能一览
 
@@ -21,13 +21,53 @@
 - 内容：作品是 Markdown（`content/<年>/works/*.md`），构建时用 marked 渲染成 HTML。
 - 部署：一台 VPS，Caddy 提供静态文件，并把 `/api` 请求转给后端。
 
+## 作品内容不在仓库里
+
+参赛作品的版权属于各位作者，所以仓库**不包含** `content/` 目录（已写进 `.gitignore`）。克隆下来以后需要先自己准备内容，否则构建会报错。最少只要一届、一篇：
+
+```
+content/
+  2026/
+    edition.json
+    works/
+      01-示例作品.md
+```
+
+`edition.json`：
+
+```json
+{
+  "year": 2026,
+  "name": "示例神话造物设计大赛",
+  "shortName": "2026 示例大赛",
+  "status": "published",
+  "intro": "这一届的简介。",
+  "note": ""
+}
+```
+
+`works/01-示例作品.md`（开头是 front matter，下面是正文 Markdown）：
+
+```markdown
+---
+no: 1
+title: "示例作品"
+author: "作者名"
+---
+## 传录
+
+正文……
+```
+
+可选：每届目录下放 `results.json`（名次）和 `reviews.json`（评语），公示页会读取；`assets/<作品文件名>/` 放作品附图。
+
 ## 本地运行
 
-需要 **Node.js 24**（要用到内置的 `node:sqlite`）。
+需要 **Node.js 24**（要用到内置的 `node:sqlite`），并按上一节准备好 `content/`。
 
 ```bash
 npm ci
-npm run web       # 构建站点到 dist/web/，最后一行输出 "web out= .../dist/web/index.html" 才算成功
+npm run web       # 构建站点到 dist/web/，输出里出现 "web out= .../dist/web/index.html" 才算成功
 npm run preview   # 同时启动后端和静态预览，打开 http://127.0.0.1:18881
 ```
 
@@ -41,7 +81,7 @@ npm run preview   # 同时启动后端和静态预览，打开 http://127.0.0.1:
 | --- | --- |
 | `PORT` | 后端端口，默认 `3000` |
 | `DATABASE_PATH` | SQLite 文件路径 |
-| `ADMIN_QQ` | 初始管理员的 QQ 号，多个用逗号分隔。**自己部署时务必设置**，否则会用代码里的默认名单 |
+| `ADMIN_QQ` | 初始管理员的 QQ 号，多个用逗号分隔。不设置就没有管理员，进不了管理后台 |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM_NAME` | 发注册验证码用的邮箱（默认 QQ 邮箱 SMTP） |
 | `CODE_TTL_MINUTES` / `CODE_RESEND_SECONDS` / `SMTP_DAILY_LIMIT` | 验证码有效期、重发间隔、每日发信上限 |
 
@@ -62,7 +102,7 @@ node scripts/test/search-recommendations.test.mjs
 ## 目录结构
 
 ```
-content/<年>/           每届的 edition.json、作品 Markdown、附件、历届名次与评语
+content/<年>/           （不进仓库）每届的 edition.json、作品 Markdown、附件、名次与评语
 scripts/build-html.mjs  渲染作品，生成单文件离线版和 server/catalogue.json
 scripts/build-web.mjs   组装线上站点 dist/web/（含每篇作品的独立链接页）
 scripts/local-preview.mjs  本地预览
@@ -70,7 +110,7 @@ server/index.cjs        后端：唯一接口 POST /api，body 为 { action, pay
 viewer/                 前端：viewer.js 主程序、viewer.css 样式、梦门、小女巫、导读等
 ```
 
-`dist/`、`data/`、`output/` 是构建产物或本地数据，不进仓库。
+`content/`、`dist/`、`data/`、`output/` 是作品、构建产物或本地数据，不进仓库。
 
 ## 想改点什么之前
 
@@ -83,5 +123,5 @@ viewer/                 前端：viewer.js 主程序、viewer.css 样式、梦�
 
 ## 版权说明
 
-- `content/` 中的参赛作品，版权归各位原作者所有，仅用于本档案馆的展示。转载或他用请先征得作者同意。
+- 参赛作品版权归各位原作者所有，因此没有放进本仓库。线上站点的作品仅用于档案馆展示，转载或他用请先征得作者同意。
 - 标题字体 `viewer/assets/dreamland-display-serif.woff2` 是思源宋体（Source Han Serif）的子集，遵循 SIL Open Font License 1.1，详见 `viewer/assets/` 下的许可文件。

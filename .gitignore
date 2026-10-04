@@ -17,3 +17,7 @@ __pycache__/
 *.db
 *.sqlite
 *.sqlite3
+
+# Contest works and import reports stay local (authors' copyright, contributor QQ numbers)
+content/
+archive-import-report.json

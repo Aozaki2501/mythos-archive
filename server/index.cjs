@@ -106,9 +106,7 @@ function getInitialAdminQQs() {
     .split(/[,;\s]+/)
     .map((s) => s.trim())
     .filter(Boolean);
-  return list.length
-    ? list
-    : ["3376909263", "346274695", "2113155803", "550475568"];
+  return list;
 }
 
 // 确保目录存在
