@@ -101,10 +101,22 @@ test("统计期所有身份可读排名、评分和作者，特别奖与评语�
   }
   const anonymousBundle = await call("getWorkBundle", { workId: workIds[0] });
   assert.deepEqual(anonymousBundle.ratings, []);
+  const statsReport = await call("adminGetReport", {}, "token-11111");
+  assert.equal(Object.hasOwn(statsReport, "ratings"), false, "管理后台不再下发逐条评分");
+  assert.equal(statsReport.workStats.find((row) => row.workId === workIds[0]).totalAvg, 5);
   const settings = JSON.parse(db.prepare("SELECT value FROM settings WHERE key = 'main'").get().value);
   for (const phase of ["征文", "评分"]) {
     settings.editions["2026"].phase = phase;
     db.prepare("UPDATE settings SET value = ? WHERE key = 'main'").run(JSON.stringify(settings));
+    const adminBundle = await call("getWorkBundle", { workId: workIds[0] }, "token-11111");
+    assert.deepEqual(adminBundle.ratings, [], "管理员也拿不到他人分数");
+    assert.equal(adminBundle.ratingCount, 1);
+    const report = await call("adminGetReport", {}, "token-11111");
+    const row = report.workStats.find((item) => item.workId === workIds[0]);
+    assert.equal(row.ratingCount, 1);
+    assert.equal(row.totalAvg, null, "评分进行中不给均分");
+    assert.equal(row.overallAvg, null);
+    assert.deepEqual(report.hiddenAverageEditions, ["2026"]);
     for (const token of ["", "visitor", "token-33333", "token-11111"]) {
       const insights = await call("getEditionInsights", { editionSlug: "2026" }, token);
       assert.equal(insights.rankingsAvailable, false);

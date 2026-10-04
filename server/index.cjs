@@ -2141,11 +2141,10 @@ async function handle(action, payload, auth, ctx) {
       const rawRatings = db.prepare("SELECT id, workId, qq, chuanlu, dangan, overall, t FROM ratings WHERE workId = ?").all(workId);
       const excludedQQs = new Set(db.prepare("SELECT qq FROM rating_exclusions").all().map((row) => row.qq));
       const countedRatings = rawRatings.filter((rating) => !excludedQQs.has(rating.qq));
+      // 管理员与普通用户同样处理：任何人都拿不到「谁投了多少分」，评分阶段也拿不到他人分数。
       let ratings = [];
-      if (session && session.role === "admin") {
-        ratings = countedRatings;
-      } else if (st.phase === "征文" || st.phase === "评分") {
-        // 评分阶段：普通用户只能看到自己的评分
+      if (st.phase === "征文" || st.phase === "评分") {
+        // 评分阶段：只能看到自己的评分
         if (user) {
           ratings = rawRatings.filter((r) => r.qq === user.qq);
         } else {
@@ -2213,6 +2212,8 @@ async function handle(action, payload, auth, ctx) {
 
       return {
         ratings,
+        // 票数只给管理员；不含分数。
+        ratingCount: session && session.role === "admin" ? countedRatings.length : undefined,
         comments,
         authorNote,
         content,
@@ -2932,7 +2933,6 @@ async function handle(action, payload, auth, ctx) {
         enabled: !!row.enabled,
         createdAt: row.createdAt,
       }));
-      const ratings = db.prepare("SELECT workId, qq, chuanlu, dangan, overall, t FROM counted_ratings ORDER BY t DESC").all();
       const comments = db.prepare("SELECT workId, qq, name, anonymous, judge, body, t, editedAt FROM comments ORDER BY t DESC").all().map((row) => ({
         ...row,
         anonymous: !!row.anonymous,
@@ -2942,8 +2942,17 @@ async function handle(action, payload, auth, ctx) {
         SELECT DISTINCT substr(workId, 1, instr(workId, '/') - 1) AS slug FROM counted_ratings
         UNION SELECT DISTINCT substr(workId, 1, instr(workId, '/') - 1) AS slug FROM comments
       `).all().map((row) => row.slug).filter(Boolean);
-      const workStats = editionSlugs.flatMap((slug) => reportWorkStats(slug));
-      return { summary: reportSummary(), users, ratings, comments, workStats };
+      // 不再返回逐条评分（评分者 QQ → 分数）；征文、评分阶段且未公示的届别不返回均分，只留票数。
+      const hiddenAverageEditions = editionSlugs.filter((slug) => {
+        const phase = settings.editions && settings.editions[slug] && settings.editions[slug].phase;
+        return (phase === "征文" || phase === "评分") && !publicationOf(slug);
+      });
+      const workStats = editionSlugs.flatMap((slug) => {
+        const rows = reportWorkStats(slug);
+        if (!hiddenAverageEditions.includes(slug)) return rows;
+        return rows.map((row) => ({ ...row, chuanluAvg: null, danganAvg: null, overallAvg: null, totalAvg: null }));
+      });
+      return { summary: reportSummary(), users, comments, workStats, hiddenAverageEditions };
     }
 
     case "adminSaveReadingGuides": {

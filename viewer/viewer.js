@@ -1501,6 +1501,8 @@
   var cloudAwards = {};
   var cloudAccountScopeVersion = 0;
   var cloudContent = {};
+  // 管理员可见的票数（服务端不再下发他人分数）
+  var ratingCounts = {};
   var activeReaderRerender = null;
   var staticContent = {};
   var staticContentInflight = {};
@@ -1510,6 +1512,8 @@
 
   function hydrateWorkBundle(id, data) {
     store.ratings[id] = data.ratings || [];
+    if (data.ratingCount != null) ratingCounts[id] = Number(data.ratingCount) || 0;
+    else delete ratingCounts[id];
     store.comments[id] = data.comments || [];
     if (data.authorNote) store.authorNotes[id] = data.authorNote;
     else delete store.authorNotes[id];
@@ -5681,6 +5685,9 @@
       var summaryLine = el("p", "modal-meta");
       body.appendChild(summaryLine);
       body.appendChild(el("h3", "modal-sub", "作品评分与热度"));
+      var hiddenAverageEditions = report.hiddenAverageEditions || [];
+      var averageNote = el("p", "modal-meta");
+      body.appendChild(averageNote);
 
       function editionYear(edition) {
         var year = Number(edition && edition.year);
@@ -5815,7 +5822,12 @@
         var editionLabel = selectedEdition === "__all__"
           ? "全部届次"
           : edition ? (edition.shortName || edition.name || edition.slug) : selectedEdition;
-        summaryLine.textContent = editionLabel + " · 账号 " + (summary.users || 0) + "（启用 " + (summary.enabledUsers || 0) + "） · 评分 " + rowsForSelection(report.ratings).length + " · 评论 " + rowsForSelection(report.comments).length;
+        var averagesHidden = hiddenAverageEditions.some(function (slug) {
+          return selectedEdition === "__all__" || slug === selectedEdition;
+        });
+        averageNote.textContent = averagesHidden ? "评分进行中的届别只显示票数，均分待大众评分结束后开放。" : "";
+        averageNote.hidden = !averagesHidden;
+        summaryLine.textContent = editionLabel + " · 账号 " + (summary.users || 0) + "（启用 " + (summary.enabledUsers || 0) + "） · 评分 " + rowsForSelection(report.workStats).reduce(function (sum, row) { return sum + (Number(row.ratingCount) || 0); }, 0) + " · 评论 " + rowsForSelection(report.comments).length;
       }
 
       editionSelect.addEventListener("change", function () {
@@ -5833,9 +5845,6 @@
         });
         tools.appendChild(button);
       }
-      addExport("导出评分明细", "评分明细", ["作品", "评分者QQ", "传录", "档案", "综合", "评分时间"], function () {
-        return rowsForSelection(report.ratings).map(function (r) { return [r.workId, r.qq, r.chuanlu, r.dangan, r.overall, r.t]; });
-      });
       addExport("导出评分汇总", "评分汇总", ["作品", "评分人数", "传录均分", "档案均分", "综合均分", "总平均分", "评论数"], function () {
         return sortedWorkStats().map(function (r) { return [r.workId, r.ratingCount, r.chuanluAvg, r.danganAvg, r.overallAvg, r.totalAvg, r.commentCount]; });
       });
@@ -7221,7 +7230,8 @@
     }
 
     var phase = phaseOf(state.editionSlug);
-    var showPublicAverages = isAdmin() || phase === "统计" || phase === "公示";
+    // 评分进行中任何人（含管理员）都看不到实时均分，管理员只看票数
+    var showPublicAverages = phase === "统计" || phase === "公示";
     var summary = el("div", "score-summary");
     var stats = averages(id);
     // 投票人数只给管理员看；其他人没评过时显示"尚未评分"
@@ -7244,6 +7254,9 @@
         summary.appendChild(cell);
       });
       sheet.appendChild(summary);
+    } else if (isAdmin() && votingOpen()) {
+      var count = ratingCounts[id] || 0;
+      sheet.appendChild(el("p", "rate-hint", "已收到 " + count + " 份评议。均分在大众评分结束后开放。"));
     } else if (!votingOpen()) {
       sheet.appendChild(el("p", "rate-hint", "作品均分将在大众评分结束后开放查看。"));
     }
