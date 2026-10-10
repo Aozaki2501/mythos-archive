@@ -5579,7 +5579,7 @@
           reviewInput.rows = 8;
           reviewInput.maxLength = 30000;
           reviewInput.value = award.review;
-          reviewInput.placeholder = "可粘贴完整评语，多段评语之间空一行";
+          reviewInput.placeholder = "可粘贴完整评语，多段评语之间空一行；多位评委时，每位评委的第一段以「【评委名】」开头";
           reviewLabel.appendChild(reviewInput);
           fields.appendChild(reviewLabel);
 
@@ -8273,6 +8273,22 @@
       });
   }
 
+  // 本届特别奖的评语存为一段文字：以「【评委名】」开头的段落另起一位评委，之前的段落归入无署名的一则
+  function awardReviewsOf(text) {
+    var reviews = [];
+    String(text || "").split(/\n\s*\n/).forEach(function (paragraph) {
+      paragraph = paragraph.trim();
+      if (!paragraph) return;
+      var marker = paragraph.match(/^【([^】]{1,30})】\s*/);
+      if (marker || !reviews.length) {
+        reviews.push({ reviewer: marker ? marker[1] : "评委评语", body: marker ? paragraph.slice(marker[0].length) : paragraph });
+      } else {
+        reviews[reviews.length - 1].body += "\n\n" + paragraph;
+      }
+    });
+    return reviews;
+  }
+
   function renderHistoricalReview(review, index) {
     var item = el("div", "historical-review");
     var reviewerLabel = review.reviewer === "评委组" && index != null
@@ -8449,12 +8465,9 @@
       });
     }
     if (award && award.review) {
-      var review = el("div", "historical-review");
-      review.appendChild(el("h4", "historical-review-by", award.name + " · 评委评语"));
-      var body = el("div", "historical-review-body");
-      appendHistoricalReviewText(body, award.review);
-      review.appendChild(body);
-      box.appendChild(review);
+      awardReviewsOf(award.review).forEach(function (review) {
+        box.appendChild(renderHistoricalReview({ reviewer: award.name + " · " + review.reviewer, body: review.body }));
+      });
     }
     return box;
   }
@@ -8501,6 +8514,14 @@
       cardHead.appendChild(el("span", null, "No. " + edition.year + " / " + String(entry.work ? entry.work.no : index + 1).padStart(3, "0")));
       main.appendChild(cardHead);
       main.appendChild(createTagSeal(entry.award, "award-card-name"));
+      // 奖项题词与授奖说明（content/<届>/edition.json 的 awards，按奖名对应）
+      var awardNote = edition.awards && edition.awards[entry.award];
+      if (awardNote && (awardNote.motto || awardNote.description)) {
+        var note = el("p", "award-card-note");
+        if (awardNote.motto) note.appendChild(el("span", "award-card-motto", "“" + awardNote.motto + "”"));
+        if (awardNote.description) note.appendChild(document.createTextNode(awardNote.description));
+        main.appendChild(note);
+      }
       var title = el("h3", "award-card-title");
       if (entry.work) {
         var link = el("a", null, entry.title);
@@ -8516,8 +8537,11 @@
           return dim.label + " " + (Number.isFinite(Number(dim.average)) ? Number(dim.average).toFixed(2) : "—");
         }).join(" · ")));
       }
-      if (entry.review) {
-        main.appendChild(el("blockquote", "award-card-quote", String(entry.review).replace(/\s+/g, " ").slice(0, featured ? 165 : 85) + (entry.review.length > (featured ? 165 : 85) ? "…" : "")));
+      var reviews = entry.reviews || [];
+      if (reviews.length) {
+        var quote = String(reviews[0].body).replace(/\s+/g, " ");
+        var quoteLimit = featured ? 165 : 85;
+        main.appendChild(el("blockquote", "award-card-quote", quote.slice(0, quoteLimit) + (quote.length > quoteLimit ? "…" : "")));
       }
       var footer = el("div", "award-card-footer");
       if (entry.work) {
@@ -8525,16 +8549,20 @@
         read.href = "#/" + edition.slug + "/" + encodeURIComponent(entry.work.slug);
         footer.appendChild(read);
       }
-      if (entry.review) {
+      if (reviews.length) {
         var reviewDetails = el("details", "award-card-review-details");
-        reviewDetails.appendChild(el("summary", null, "全部评语"));
-        appendHistoricalReviewText(reviewDetails, entry.review);
+        reviewDetails.appendChild(el("summary", null, reviews.length > 1 ? "全部评语（" + reviews.length + " 则）" : "全部评语"));
+        reviews.forEach(function (review, reviewIndex) {
+          reviewDetails.appendChild(renderHistoricalReview(review, reviews.length > 1 ? reviewIndex : null));
+        });
         footer.appendChild(reviewDetails);
       }
       if (entry.work) {
         var shareAward = el("button", "btn-ghost award-card-share", "生成授奖卡");
         shareAward.type = "button";
-        shareAward.addEventListener("click", function () { openShareCardModal(edition, entry.work, "", entry); });
+        shareAward.addEventListener("click", function () {
+          openShareCardModal(edition, entry.work, "", Object.assign({}, entry, { review: reviews.length ? reviews[0].body : "" }));
+        });
         footer.appendChild(shareAward);
       }
       main.appendChild(footer);
@@ -8604,11 +8632,11 @@
 
     var awardedRows = rankings.filter(function (row) { return row.award; });
     renderAwardGallery(sheet, edition, awardedRows.map(function (row) {
-      var review = reviews.filter(function (item) { return item.workSlug === row.workSlug; })[0];
       return {
         award: row.award, title: row.title, author: row.author,
         work: row.workSlug && worksBySlug[row.workSlug], rank: row.rank,
-        overall: row.overall, dimensions: row.dimensions || [], review: review && review.body,
+        overall: row.overall, dimensions: row.dimensions || [],
+        reviews: reviews.filter(function (item) { return item.workSlug === row.workSlug; }),
       };
     }));
 
@@ -8773,7 +8801,7 @@
       renderResultsFigures(sheet, [
         [edition.works.length, "份档案"],
         [officialAwards.length, "项奖"],
-        [officialAwards.filter(function (award) { return award.review || award.excerpt; }).length, "条评语"],
+        [officialAwards.reduce(function (sum, award) { return sum + awardReviewsOf(award.review || award.excerpt).length; }, 0), "条评语"],
         [Object.keys(awardResult.authorReveals || {}).length, "份署名档案"],
       ]);
     } else if (isJudgePhase(edition.slug)) {
@@ -9043,7 +9071,7 @@
       return {
         award: award.name, title: work ? work.title : "档案待补录", work: work,
         author: (result.authorReveals || {})[award.workId] || "匿名",
-        review: award.review || award.excerpt || "", rank: ranking && ranking.rank,
+        reviews: awardReviewsOf(award.review || award.excerpt), rank: ranking && ranking.rank,
         overall: ranking && ranking.totalAvg,
         dimensions: dimAverages.some(function (value) { return value != null; })
           ? DIMENSIONS.map(function (dim, index) { return { label: dim.label, average: dimAverages[index] }; })
@@ -12334,7 +12362,7 @@
           openShareCardModal(edition, work, "", {
             award: historicalAward ? historicalAward.award : currentAward.name,
             author: revealedAuthor || work.author || "匿名",
-            review: historicalAward ? oldReview && oldReview.body : currentAward.review,
+            review: historicalAward ? oldReview && oldReview.body : (awardReviewsOf(currentAward.review)[0] || {}).body,
             rank: historicalAward ? historicalAward.rank : currentRanking && currentRanking.rank,
             overall: historicalAward ? historicalAward.overall : currentRanking && currentRanking.totalAvg,
           });
@@ -12587,7 +12615,9 @@
       if (currentAward && currentAward.review) {
         var awardReview = el("section", "panel historical-work-reviews");
         awardReview.appendChild(el("h2", "panel-title", "评委评语 · " + currentAward.name));
-        appendHistoricalReviewText(awardReview, currentAward.review);
+        awardReviewsOf(currentAward.review).forEach(function (review) {
+          awardReview.appendChild(renderHistoricalReview(review));
+        });
         sheet.appendChild(awardReview);
       }
       var authorNote = renderAuthorNotePanel(id, work);

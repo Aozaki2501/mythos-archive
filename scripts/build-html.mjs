@@ -265,6 +265,7 @@ function readEdition(slug) {
     note: meta.note ?? "",
     sourceFormat: meta.sourceFormat ?? "",
     sourceFolder: meta.sourceFolder ?? "",
+    awards: meta.awards ?? {},
     results,
     reviews,
     works,
