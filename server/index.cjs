@@ -1599,6 +1599,19 @@ function publicEditionAwards(settings, editionSlug, leaderboard) {
   };
 }
 
+// 公示快照不可改；公示后补录的特别奖与评语另存于 settings.awardAddenda，读取时替换快照里的特别奖，名次与作者公开范围仍以快照为准
+function publishedAwardsOf(settings, editionSlug, publication) {
+  const addendum = settings.awardAddenda && settings.awardAddenda[editionSlug];
+  if (!addendum || !Array.isArray(addendum.specialAwards)) return publication.awards;
+  const catalogueIds = new Set(manifestCatalogueIds(editionSlug));
+  const excluded = new Set((publication.disqualified || []).map((row) => row.workId));
+  const specialAwards = addendum.specialAwards
+    .filter((award) => award && catalogueIds.has(award.workId) && !excluded.has(award.workId));
+  const awardedWorkIds = new Set(publication.awards.awardedWorkIds || []);
+  specialAwards.forEach((award) => awardedWorkIds.add(award.workId));
+  return { ...publication.awards, awardedWorkIds: Array.from(awardedWorkIds), specialAwards };
+}
+
 function createPublication(settings, editionSlug, confirmedBy) {
   if (publicationOf(editionSlug)) throw new Error("本届已有正式公示");
   const catalogueIds = new Set(manifestCatalogueIds(editionSlug));
@@ -1771,7 +1784,7 @@ async function handle(action, payload, auth, ctx) {
       if (!/^[A-Za-z0-9_-]{1,64}$/.test(editionSlug)) throw new Error("届别编号无效");
       const publication = publicationOf(editionSlug);
       if (publication) return {
-        ...publication.awards,
+        ...publishedAwardsOf(settings, editionSlug, publication),
         authorReveals: publication.authorReveals || publication.awards.authorReveals || {},
         publication: publicPublication(publication),
       };
@@ -2907,7 +2920,16 @@ async function handle(action, payload, auth, ctx) {
       if (!user || session.role !== "admin") throw new Error("需要管理员");
       const editionSlug = String(payload.editionSlug || "").trim();
       if (!/^[A-Za-z0-9_-]{1,64}$/.test(editionSlug)) throw new Error("届别编号无效");
+      const publication = publicationOf(editionSlug);
+      if (publication) {
+        const awards = publishedAwardsOf(settings, editionSlug, publication);
+        return {
+          published: true,
+          config: { authorRevealRankLimit: awards.authorRevealRankLimit, specialAwards: awards.specialAwards },
+        };
+      }
       return {
+        published: false,
         config: (settings.awardConfigs && settings.awardConfigs[editionSlug]) || emptyAwardConfig(),
       };
     }
@@ -2916,7 +2938,18 @@ async function handle(action, payload, auth, ctx) {
       if (!user || session.role !== "admin") throw new Error("需要管理员");
       const editionSlug = String(payload.editionSlug || "").trim();
       if (!/^[A-Za-z0-9_-]{1,64}$/.test(editionSlug)) throw new Error("届别编号无效");
-      if (publicationOf(editionSlug)) throw new Error("本届已正式公示，奖项配置不可修改");
+      const publication = publicationOf(editionSlug);
+      if (publication) {
+        // 公示后只补录特别奖与评语；作者公开范围沿用快照
+        const rankLimit = Number(publication.awards.authorRevealRankLimit) || 0;
+        const { specialAwards } = saveableAwardConfig(editionSlug, { ...(payload.config || {}), authorRevealRankLimit: rankLimit });
+        const excluded = new Set((publication.disqualified || []).map((row) => row.workId));
+        if (specialAwards.some((award) => excluded.has(award.workId))) throw new Error("除名作品不能获奖");
+        if (!settings.awardAddenda || typeof settings.awardAddenda !== "object") settings.awardAddenda = {};
+        settings.awardAddenda[editionSlug] = { specialAwards, updatedAt: new Date().toISOString(), updatedBy: user.qq };
+        saveSettings(settings);
+        return { published: true, config: { authorRevealRankLimit: rankLimit, specialAwards } };
+      }
       const config = saveableAwardConfig(editionSlug, payload.config || {});
       if (!settings.awardConfigs || typeof settings.awardConfigs !== "object") settings.awardConfigs = {};
       settings.awardConfigs[editionSlug] = config;

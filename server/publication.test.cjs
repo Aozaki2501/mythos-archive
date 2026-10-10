@@ -175,7 +175,18 @@ test("阶段只能由两位不同管理员确认，正式结果保持固定", as
   assert.deepEqual((await call("getEditionInsights", { editionSlug: "2026" })).leaderboard, insights.leaderboard);
   assert.deepEqual((await call("getEditionInsights", { editionSlug: "2026" })).authorReveals, insights.authorReveals);
   assert.deepEqual((await call("getEditionAwards", { editionSlug: "2026" })).authorReveals, awards.authorReveals);
-  await assert.rejects(call("adminSaveEditionAwardsConfig", { editionSlug: "2026", config: { authorRevealRankLimit: 0, specialAwards: [] } }, first), /不可修改/);
+  // 公示后可补录特别奖与评语，名次与快照不变
+  const before = db.prepare("SELECT snapshot FROM edition_publications").get().snapshot;
+  await call("adminSaveEditionAwardsConfig", { editionSlug: "2026", config: { authorRevealRankLimit: 0, specialAwards: [{ name: "补录奖", workId: workIds[2], excerpt: "节选", review: "补录评语" }] } }, first);
+  const supplemented = await call("getEditionAwards", { editionSlug: "2026" });
+  assert.deepEqual(supplemented.specialAwards.map((award) => [award.name, award.workId, award.review]), [["补录奖", workIds[2], "补录评语"]]);
+  assert.ok(supplemented.awardedWorkIds.includes(workIds[2]));
+  assert.equal(supplemented.authorRevealRankLimit, awards.authorRevealRankLimit);
+  assert.deepEqual(supplemented.authorReveals, awards.authorReveals);
+  assert.equal((await call("adminGetEditionAwardsConfig", { editionSlug: "2026" }, first)).config.specialAwards[0].name, "补录奖");
+  await assert.rejects(call("adminSaveEditionAwardsConfig", { editionSlug: "2026", config: { specialAwards: [] } }), /需要管理员/);
+  assert.equal(db.prepare("SELECT snapshot FROM edition_publications").get().snapshot, before);
+  assert.deepEqual((await call("getEditionInsights", { editionSlug: "2026" })).leaderboard, insights.leaderboard);
   assert.throws(() => db.prepare("DELETE FROM edition_publications WHERE editionSlug = '2026'").run(), /不可删除/);
 });
 
@@ -222,6 +233,7 @@ test("除名作品不计名次、不收评分，公示快照记录除名且之�
   assert.equal(published.disqualified[0].workId, workIds[0]);
   const awards = await call("getEditionAwards", { editionSlug: "2026" });
   assert.deepEqual(awards.specialAwards.map((award) => award.workId), [workIds[1]]);
+  await assert.rejects(call("adminSaveEditionAwardsConfig", { editionSlug: "2026", config: { specialAwards: [{ name: "补录", workId: workIds[0] }] } }, admin), /除名作品/);
   await assert.rejects(call("adminSetWorkDisqualified", { workId: workIds[0], disqualified: false }, admin), /已正式公示/);
 });
 

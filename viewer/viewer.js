@@ -5457,7 +5457,9 @@
             (store.settings.awardConfigs && store.settings.awardConfigs[editionSlug]) ||
             { authorRevealRankLimit: 25, specialAwards: [] },
         });
+    var published = false;
     load.then(function (data) {
+      published = !!(data && data.published);
       renderEditor((data && data.config) || { authorRevealRankLimit: 25, specialAwards: [] });
     }).catch(function (err) {
       var fail = el("div", "modal-body");
@@ -5483,7 +5485,9 @@
         el(
           "p",
           "modal-meta",
-          "排名、评分与已绑定作者在投票统计期公开。特别奖与评语仅在结果公示期发布，统计期间可继续编写。奖品清单和捐赠信息不公开。",
+          published
+            ? "本届已正式公示，名次已封存。特别奖与评语仍可补录或修订，保存后立即在公示页显示。"
+            : "排名、评分与已绑定作者在投票统计期公开。特别奖与评语仅在结果公示期发布，统计期间可继续编写。奖品清单和捐赠信息不公开。",
         ),
       );
 
@@ -5639,7 +5643,7 @@
           persist();
           cloudAwardsLoaded[editionSlug] = false;
           delete cloudAwards[editionSlug];
-          status.textContent = "设置已保存。特别奖只会在结果公示阶段显示。";
+          status.textContent = published ? "已补录到本届公示。" : "设置已保存。特别奖只会在结果公示阶段显示。";
           save.disabled = false;
         }).catch(function (err) {
           error.textContent = err.message || String(err);
